@@ -1,4 +1,4 @@
-name: Build Docker image
+name: Build and Push Docker to My Hub
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: evoapicloud/evolution-api
+          images: ihamani0/evolution-api
           tags: latest
 
       - name: Set up QEMU

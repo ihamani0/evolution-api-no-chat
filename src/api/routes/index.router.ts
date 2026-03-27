@@ -20,6 +20,7 @@ import { GroupRouter } from './group.router';
 import { InstanceRouter } from './instance.router';
 import { LabelRouter } from './label.router';
 import { ProxyRouter } from './proxy.router';
+import { RateLimiterRouter } from './rate-limiter.router';
 import { MessageRouter } from './sendMessage.router';
 import { SettingsRouter } from './settings.router';
 import { TemplateRouter } from './template.router';
@@ -223,6 +224,7 @@ router
   .use('/group', new GroupRouter(...guards).router)
   .use('/template', new TemplateRouter(configService, ...guards).router)
   .use('/settings', new SettingsRouter(...guards).router)
+  .use('/rate-limiter', new RateLimiterRouter(...guards).router)
   .use('/proxy', new ProxyRouter(...guards).router)
   .use('/label', new LabelRouter(...guards).router)
   .use('', new ChannelRouter(configService, ...guards).router)

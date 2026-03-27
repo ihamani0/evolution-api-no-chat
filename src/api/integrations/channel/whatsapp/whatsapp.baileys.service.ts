@@ -1,5 +1,6 @@
 import { getCollectionsDto } from '@api/dto/business.dto';
 import { OfferCallDto } from '@api/dto/call.dto';
+import { rateLimiterService } from '@api/server.module';
 import {
   ArchiveChatDto,
   BlockUserDto,
@@ -2292,6 +2293,20 @@ export class BaileysStartupService extends ChannelStartupService {
     options?: Options,
     isIntegration = false,
   ) {
+    const config = await rateLimiterService.getConfig(this.instanceName);
+    if (config.enabled) {
+      const { canSend, waitTime } = await rateLimiterService.checkLimit(this.instanceName);
+      if (!canSend) {
+        this.logger.warn(`Rate limit reached for instance ${this.instanceName}, waiting ${waitTime}ms`);
+        await rateLimiterService.waitForSlot(this.instanceName, config.delayBetweenMessages || 2000);
+      }
+      const delay = config.delayBetweenMessages || 2000;
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      await rateLimiterService.recordMessage(this.instanceName);
+    }
+
     const isWA = (await this.whatsappNumber({ numbers: [number] }))?.shift();
 
     if (!isWA.exists && !isJidGroup(isWA.jid) && !isWA.jid.includes('@broadcast')) {

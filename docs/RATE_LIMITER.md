@@ -305,3 +305,184 @@ If you need to reset your message counts:
 curl -X DELETE "{{baseUrl}}/rate-limiter/reset?instanceName=YOUR_INSTANCE" \
   -H "apikey: YOUR_API_KEY"
 ```
+
+---
+
+## Queue System
+
+The queue system automatically stores messages when rate limits are reached and processes them when limits allow.
+
+### How It Works
+
+1. When rate limit is reached, message is queued in Redis
+2. Automatic scheduler runs every 30 seconds to process queue
+3. When new time window opens (new hour/day), queued messages are sent automatically
+4. You can also manually trigger queue processing
+
+### Queue Endpoints
+
+#### 1. Get Queue Status
+**GET** `/rate-limiter/queue/status`
+
+Get the current queue status for an instance.
+
+```bash
+curl "{{baseUrl}}/rate-limiter/queue/status?instanceName=YOUR_INSTANCE" \
+  -H "apikey: YOUR_API_KEY"
+```
+
+Response:
+```json
+{
+  "count": 5,
+  "lastProcessedAt": 1704067200000
+}
+```
+
+#### 2. Get All Queued Messages
+**GET** `/rate-limiter/queue/messages`
+
+Get all messages currently in the queue.
+
+```bash
+curl "{{baseUrl}}/rate-limiter/queue/messages?instanceName=YOUR_INSTANCE" \
+  -H "apikey: YOUR_API_KEY"
+```
+
+#### 3. Manually Process Queue
+**POST** `/rate-limiter/queue/process`
+
+Manually trigger queue processing. Optionally specify `maxMessages` to limit how many messages to process.
+
+```bash
+# Process up to 10 messages
+curl -X POST "{{baseUrl}}/rate-limiter/queue/process?instanceName=YOUR_INSTANCE" \
+  -H "apikey: YOUR_API_KEY"
+
+# Process up to 5 messages
+curl -X POST "{{baseUrl}}/rate-limiter/queue/process?instanceName=YOUR_INSTANCE&maxMessages=5" \
+  -H "apikey: YOUR_API_KEY"
+```
+
+Response:
+```json
+{
+  "processed": 3,
+  "remaining": 2,
+  "failed": 0
+}
+```
+
+#### 4. Clear Queue
+**DELETE** `/rate-limiter/queue/clear`
+
+Clear all queued messages for an instance.
+
+```bash
+curl -X DELETE "{{baseUrl}}/rate-limiter/queue/clear?instanceName=YOUR_INSTANCE" \
+  -H "apikey: YOUR_API_KEY"
+```
+
+Response:
+```json
+{
+  "success": true
+}
+```
+
+#### 5. Remove Specific Message
+**DELETE** `/rate-limiter/queue/message/:messageId`
+
+Remove a specific message from the queue.
+
+```bash
+curl -X DELETE "{{baseUrl}}/rate-limiter/queue/message/msg_abc123?instanceName=YOUR_INSTANCE" \
+  -H "apikey: YOUR_API_KEY"
+```
+
+#### 6. Set Queue Configuration
+**POST** `/rate-limiter/queue/set`
+
+Configure queue settings.
+
+```bash
+curl -X POST "{{baseUrl}}/rate-limiter/queue/set?instanceName=YOUR_INSTANCE" \
+  -H "apikey: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "maxRetries": 3,
+    "processInterval": 30000,
+    "maxMessagesPerProcess": 10,
+    "autoProcess": true
+  }'
+```
+
+Queue Configuration Options:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable/disable queue |
+| `maxRetries` | number | `3` | Max retry attempts for failed messages |
+| `processInterval` | number | `30000` | Auto-process interval in milliseconds |
+| `maxMessagesPerProcess` | number | `10` | Max messages to process per cycle |
+| `autoProcess` | boolean | `true` | Enable automatic queue processing |
+
+#### 7. Get Queue Configuration
+**GET** `/rate-limiter/queue/find`
+
+Get current queue configuration.
+
+```bash
+curl "{{baseUrl}}/rate-limiter/queue/find?instanceName=YOUR_INSTANCE" \
+  -H "apikey: YOUR_API_KEY"
+```
+
+### Example: Queue Flow
+
+```bash
+# 1. Set rate limits (very low for testing)
+curl -X POST "{{baseUrl}}/rate-limiter/set?instanceName=test" \
+  -H "apikey: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "messagesPerMinute": 1,
+    "delayBetweenMessages": 60000
+  }'
+
+# 2. Enable queue
+curl -X POST "{{baseUrl}}/rate-limiter/queue/set?instanceName=test" \
+  -H "apikey: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+
+# 3. Send messages rapidly - some will be queued
+curl -X POST "{{baseUrl}}/message/sendText?instanceName=test" \
+  -H "apikey: YOUR_API_KEY" \
+  -d '{"number": "5511999999999", "text": "Hello 1"}'
+
+curl -X POST "{{baseUrl}}/message/sendText?instanceName=test" \
+  -H "apikey: YOUR_API_KEY" \
+  -d '{"number": "5511999999999", "text": "Hello 2"}'
+
+# 4. Check queue status
+curl "{{baseUrl}}/rate-limiter/queue/status?instanceName=test" \
+  -H "apikey: YOUR_API_KEY"
+
+# 5. Manually process queue
+curl -X POST "{{baseUrl}}/rate-limiter/queue/process?instanceName=test" \
+  -H "apikey: YOUR_API_KEY"
+```
+
+### Response When Message is Queued
+
+When a message is queued because rate limit is reached, the response will include:
+
+```json
+{
+  "queued": true,
+  "messageId": "msg_abc123",
+  "position": 3
+}
+```

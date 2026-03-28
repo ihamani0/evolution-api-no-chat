@@ -436,3 +436,88 @@ curl -X POST "http://localhost:8080/rate-limiter/queue/process/YOUR_INSTANCE" \
 | delayBetweenMessages | Wait between messages | 2000-5000ms |
 
 **The key:** Keep limits moderate and use delays to appear human-like!
+
+
+## Complete Testing Guide for Rate Limiter
+
+
+Step 1: Verify Rate Limiter is Working
+Run these tests locally first:
+# API Key: issamhamani19@
+# 1. Reset counters
+curl -X DELETE "http://localhost:8080/rate-limiter/reset/issam" -H "apikey: issamhamani19@"
+# 2. Set conservative limits (30 msg/min)
+curl -X POST "http://localhost:8080/rate-limiter/set/issam" \
+  -H "apikey: issamhamani19@" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true, "messagesPerMinute": 30, "delayBetweenMessages": 2000}'
+# 3. Enable queue
+curl -X POST "http://localhost:8080/rate-limiter/queue/set/issam" \
+  -H "apikey: issamhamani19@" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+# 4. Check status
+curl "http://localhost:8080/rate-limiter/status/issam" -H "apikey: issamhamani19@"
+Expected Response:
+{
+  canSend: true,
+  remainingToday: 1000,
+  remainingThisHour: 200,
+  remainingThisMinute: 30,
+  totalSentToday: 0,
+  totalSentThisHour: 0,
+  totalSentThisMinute: 0
+}
+---
+Step 2: Test with Bot Integration
+Connect your bot to the issam instance and send messages through your bot.
+Test Scenario 1: Normal Sending
+1. Send messages through your bot normally (10-20 messages)
+2. Check status after:
+curl "http://localhost:8080/rate-limiter/status/issam" -H "apikey: issamhamani19@"
+Expected: totalSentThisMinute increases, remainingThisMinute decreases
+Test Scenario 2: Force Queue (Low Limits)
+1. Set very low limits:
+curl -X POST "http://localhost:8080/rate-limiter/set/issam" \
+  -H "apikey: issamhamani19@" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true, "messagesPerMinute": 2, "delayBetweenMessages": 1000}'
+2. Send 5 messages rapidly through your bot
+3. Check response - first 2 should send, rest should return {"queued": true}
+4. Check queue:
+curl "http://localhost:8080/rate-limiter/queue/status/issam" -H "apikey: issamhamani19@"
+Expected: {"count": 3, ...} (3 messages queued)
+---
+Step 3: Monitor in Real-Time
+Run this in a terminal to watch:
+# Watch status every 5 seconds
+watch -n 5 'curl -s "http://localhost:8080/rate-limiter/status/issam" -H "apikey: issamhamani19@" | jq .'
+---
+Step 4: Check Queue Processing
+After minute changes, queued messages should auto-send:
+# Check if queue is being processed
+curl "http://localhost:8080/rate-limiter/queue/status/issam" -H "apikey: issamhamani19@"
+# Check rate limiter
+curl "http://localhost:8080/rate-limiter/status/issam" -H "apikey: issamhamani19@"
+---
+Monitoring Endpoints Summary
+| Check | Command |
+|-------|---------|
+| Rate Status | curl "http://localhost:8080/rate-limiter/status/issam" -H "apikey: issamhamani19@" |
+| Queue Status | curl "http://localhost:8080/rate-limiter/queue/status/issam" -H "apikey: issamhamani19@" |
+| Queue Messages | curl "http://localhost:8080/rate-limiter/queue/messages/issam" -H "apikey: issamhamani19@" |
+---
+Recommended Settings for Testing
+| Scenario | messagesPerMinute | delayBetweenMessages |
+|----------|-------------------|---------------------|
+| Test Queue | 2 | 1000 |
+| Conservative | 10 | 5000 |
+| Moderate | 30 | 2000 |
+| Aggressive | 60 | 500 |
+---
+What to Watch For
+1. First message → Sent immediately (status: PENDING)
+2. Subsequent within limit → Sent normally
+3. Over limit → Return {"queued": true, "messageId": "...", "position": N}
+4. After minute resets → Queued messages auto-send
+Your bot will work normally - the rate limiter works automatically in the background!

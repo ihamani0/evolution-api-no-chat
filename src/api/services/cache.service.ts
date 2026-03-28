@@ -42,7 +42,7 @@ export class CacheService {
     if (!this.cache) {
       return;
     }
-    this.cache.set(key, value, ttl);
+    await this.cache.set(key, value, ttl);
   }
 
   public async hSet(key: string, field: string, value: any) {

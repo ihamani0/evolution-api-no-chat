@@ -80,14 +80,14 @@ export class QueueService {
 
     await this.cache.set(key, JSON.stringify(queueData), 0);
 
-    const count = queueData.messages.length;
+    const position = queueData.messages.length;
 
-    this.logger.log(`Message ${queuedMessage.id} queued for instance ${instanceName}. Position: ${count}`);
+    this.logger.log(`Message ${queuedMessage.id} queued for instance ${instanceName}. Position: ${position}`);
 
     return {
       queued: true,
       messageId: queuedMessage.id,
-      position: count,
+      position: position,
     };
   }
 

@@ -61,6 +61,10 @@ const baileysCache = new CacheService(new CacheEngine(configService, 'baileys').
 export const rateLimiterService = new RateLimiterService(cache);
 export const queueService = new QueueService(cache);
 
+queueService.startAutoProcess().catch((err) => {
+  console.error('Failed to start queue auto-process:', err);
+});
+
 let providerFiles: ProviderFiles = null;
 if (configService.get<ProviderSession>('PROVIDER').ENABLED) {
   providerFiles = new ProviderFiles(configService);

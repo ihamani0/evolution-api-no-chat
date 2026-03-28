@@ -2298,7 +2298,19 @@ export class BaileysStartupService extends ChannelStartupService {
       const { canSend, waitTime } = await rateLimiterService.checkLimit(this.instanceName);
       if (!canSend) {
         this.logger.warn(`Rate limit reached for instance ${this.instanceName}, waiting ${waitTime}ms`);
-        await rateLimiterService.waitForSlot(this.instanceName, config.delayBetweenMessages || 2000);
+        const canWait = await rateLimiterService.waitForSlot(this.instanceName, config.delayBetweenMessages || 2000);
+        if (!canWait) {
+          const { queueService } = await import('@api/server.module');
+          const queuedMsg = {
+            instanceName: this.instanceName,
+            number,
+            messageType: 'unknown',
+            messagePayload: { message, options },
+          };
+          const result = await queueService.enqueue(this.instanceName, queuedMsg);
+          this.logger.warn(`Message queued for instance ${this.instanceName}. Position: ${result.position}`);
+          return { queued: true, messageId: result.messageId, position: result.position };
+        }
       }
       const delay = config.delayBetweenMessages || 2000;
       if (delay > 0) {

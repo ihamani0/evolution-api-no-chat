@@ -10,6 +10,7 @@ import { GroupController } from './controllers/group.controller';
 import { InstanceController } from './controllers/instance.controller';
 import { LabelController } from './controllers/label.controller';
 import { ProxyController } from './controllers/proxy.controller';
+import { QueueController } from './controllers/queue.controller';
 import { RateLimiterController } from './controllers/rate-limiter.controller';
 import { SendMessageController } from './controllers/sendMessage.controller';
 import { SettingsController } from './controllers/settings.controller';
@@ -41,6 +42,7 @@ import { S3Service } from './integrations/storage/s3/services/s3.service';
 import { ProviderFiles } from './provider/sessions';
 import { PrismaRepository } from './repository/repository.service';
 import { CacheService } from './services/cache.service';
+import { QueueService } from './services/queue.service';
 import { RateLimiterService } from './services/rate-limiter.service';
 import { WAMonitoringService } from './services/monitor.service';
 import { ProxyService } from './services/proxy.service';
@@ -57,6 +59,7 @@ if (configService.get<Chatwoot>('CHATWOOT').ENABLED) {
 export const cache = new CacheService(new CacheEngine(configService, 'instance').getEngine());
 const baileysCache = new CacheService(new CacheEngine(configService, 'baileys').getEngine());
 export const rateLimiterService = new RateLimiterService(cache);
+export const queueService = new QueueService(cache);
 
 let providerFiles: ProviderFiles = null;
 if (configService.get<ProviderSession>('PROVIDER').ENABLED) {
@@ -110,6 +113,7 @@ export const businessController = new BusinessController(waMonitor);
 export const groupController = new GroupController(waMonitor);
 export const labelController = new LabelController(waMonitor);
 export const rateLimiterController = new RateLimiterController(rateLimiterService);
+export const queueController = new QueueController(queueService);
 
 export const eventManager = new EventManager(prismaRepository, waMonitor);
 export const chatbotController = new ChatbotController(prismaRepository, waMonitor);

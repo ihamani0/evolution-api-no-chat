@@ -59,7 +59,7 @@ if (configService.get<Chatwoot>('CHATWOOT').ENABLED) {
 export const cache = new CacheService(new CacheEngine(configService, 'instance').getEngine());
 const baileysCache = new CacheService(new CacheEngine(configService, 'baileys').getEngine());
 export const rateLimiterService = new RateLimiterService(cache);
-export const queueService = new QueueService(cache);
+export const queueService = new QueueService();
 
 queueService.startAutoProcess().catch((err) => {
   console.error('Failed to start queue auto-process:', err);

@@ -1,5 +1,4 @@
 import { Logger } from '@config/logger.config';
-import { CacheService } from '@api/services/cache.service';
 import { QueueConfigDto, QueueStatusDto, ProcessQueueResultDto, EnqueueResultDto } from '@api/dto/queue.dto';
 import { v4 } from 'uuid';
 
@@ -20,7 +19,6 @@ interface QueueData {
 
 export class QueueService {
   private readonly logger = new Logger('QueueService');
-  private readonly cache: CacheService;
   private readonly defaultConfig: QueueConfigDto = {
     enabled: true,
     maxRetries: 3,
@@ -31,28 +29,29 @@ export class QueueService {
 
   private processingInstances: Set<string> = new Set();
 
-  constructor(cacheService: CacheService) {
-    this.cache = cacheService;
+  private queueData: Map<string, QueueData> = new Map();
+
+  private getQueueData(instanceName: string): QueueData {
+    if (!this.queueData.has(instanceName)) {
+      this.queueData.set(instanceName, { messages: [], lastProcessedAt: undefined });
+    }
+    return this.queueData.get(instanceName)!;
   }
 
-  private getQueueKey(instanceName: string): string {
-    return `rate_limiter:queue:${instanceName}`;
-  }
-
-  private getConfigKey(instanceName: string): string {
-    return `rate_limiter:queue:config:${instanceName}`;
+  private saveQueueData(instanceName: string, data: QueueData): void {
+    this.queueData.set(instanceName, data);
   }
 
   async getConfig(instanceName: string): Promise<QueueConfigDto> {
-    const key = this.getConfigKey(instanceName);
-    const data = await this.cache.get(key);
-    return data || this.defaultConfig;
+    const data = this.getQueueData(instanceName);
+    const config = (data as any).config;
+    return config || this.defaultConfig;
   }
 
   async setConfig(instanceName: string, config: QueueConfigDto): Promise<void> {
-    const key = this.getConfigKey(instanceName);
-    const mergedConfig = { ...this.defaultConfig, ...config };
-    await this.cache.set(key, JSON.stringify(mergedConfig), 0);
+    const data = this.getQueueData(instanceName);
+    (data as any).config = { ...this.defaultConfig, ...config };
+    this.saveQueueData(instanceName, data);
   }
 
   async enqueue(
@@ -65,7 +64,7 @@ export class QueueService {
       return { queued: false };
     }
 
-    const key = this.getQueueKey(instanceName);
+    const data = this.getQueueData(instanceName);
     const queuedMessage: QueuedMessage = {
       ...message,
       id: v4(),
@@ -73,14 +72,10 @@ export class QueueService {
       retryCount: 0,
     };
 
-    const existingData = await this.cache.get(key);
-    let queueData: QueueData = existingData ? JSON.parse(existingData) : { messages: [] };
+    data.messages.push(queuedMessage);
+    this.saveQueueData(instanceName, data);
 
-    queueData.messages.push(queuedMessage);
-
-    await this.cache.set(key, JSON.stringify(queueData), 0);
-
-    const position = queueData.messages.length;
+    const position = data.messages.length;
 
     this.logger.log(`Message ${queuedMessage.id} queued for instance ${instanceName}. Position: ${position}`);
 
@@ -92,96 +87,60 @@ export class QueueService {
   }
 
   async dequeue(instanceName: string): Promise<QueuedMessage | null> {
-    const key = this.getQueueKey(instanceName);
-    const existingData = await this.cache.get(key);
+    const data = this.getQueueData(instanceName);
 
-    if (!existingData) {
+    if (data.messages.length === 0) {
       return null;
     }
 
-    const queueData: QueueData = JSON.parse(existingData);
+    const message = data.messages.shift()!;
+    this.saveQueueData(instanceName, data);
 
-    if (queueData.messages.length === 0) {
-      return null;
-    }
-
-    const message = queueData.messages.shift();
-
-    await this.cache.set(key, JSON.stringify(queueData), 0);
-
-    return message || null;
+    return message;
   }
 
   async peek(instanceName: string): Promise<QueuedMessage | null> {
-    const key = this.getQueueKey(instanceName);
-    const existingData = await this.cache.get(key);
+    const data = this.getQueueData(instanceName);
 
-    if (!existingData) {
+    if (data.messages.length === 0) {
       return null;
     }
 
-    const queueData: QueueData = JSON.parse(existingData);
-
-    if (queueData.messages.length === 0) {
-      return null;
-    }
-
-    return queueData.messages[0] || null;
+    return data.messages[0] || null;
   }
 
   async getAllMessages(instanceName: string): Promise<QueuedMessage[]> {
-    const key = this.getQueueKey(instanceName);
-    const existingData = await this.cache.get(key);
-
-    if (!existingData) {
-      return [];
-    }
-
-    const queueData: QueueData = JSON.parse(existingData);
-    return queueData.messages;
+    const data = this.getQueueData(instanceName);
+    return [...data.messages];
   }
 
   async getStatus(instanceName: string): Promise<QueueStatusDto> {
-    const key = this.getQueueKey(instanceName);
-    const existingData = await this.cache.get(key);
-
-    if (!existingData) {
-      return { count: 0, lastProcessedAt: null };
-    }
-
-    const queueData: QueueData = JSON.parse(existingData);
-
+    const data = this.getQueueData(instanceName);
     return {
-      count: queueData.messages.length,
-      lastProcessedAt: queueData.lastProcessedAt || null,
+      count: data.messages.length,
+      lastProcessedAt: data.lastProcessedAt || null,
     };
   }
 
   async clear(instanceName: string): Promise<void> {
-    const key = this.getQueueKey(instanceName);
-    await this.cache.delete(key);
+    const data = this.getQueueData(instanceName);
+    data.messages = [];
+    data.lastProcessedAt = undefined;
+    this.saveQueueData(instanceName, data);
     this.logger.log(`Queue cleared for instance ${instanceName}`);
   }
 
   async removeMessage(instanceName: string, messageId: string): Promise<boolean> {
-    const key = this.getQueueKey(instanceName);
-    const existingData = await this.cache.get(key);
+    const data = this.getQueueData(instanceName);
+    const originalLength = data.messages.length;
 
-    if (!existingData) {
+    data.messages = data.messages.filter((msg) => msg.id !== messageId);
+
+    if (data.messages.length === originalLength) {
       return false;
     }
 
-    const queueData: QueueData = JSON.parse(existingData);
-    const originalLength = queueData.messages.length;
-
-    queueData.messages = queueData.messages.filter((msg) => msg.id !== messageId);
-
-    if (queueData.messages.length === originalLength) {
-      return false;
-    }
-
-    await this.cache.set(key, JSON.stringify(queueData), 0);
-
+    this.saveQueueData(instanceName, data);
     return true;
   }
 
@@ -205,7 +164,7 @@ export class QueueService {
       let remaining = status.count;
 
       while (processed < limit && remaining > 0) {
-        const canSend = await this.checkAndWaitForSlot(instanceName);
+        const canSend = await this.checkAndWaitForSlot(instanceName, config);
 
         if (!canSend) {
           this.logger.log(`Rate limit reached for instance ${instanceName}, waiting for next cycle`);
@@ -228,11 +187,9 @@ export class QueueService {
 
           if (message.retryCount < (config.maxRetries || 3)) {
             message.retryCount++;
-            const key = this.getQueueKey(instanceName);
-            const existingData = await this.cache.get(key);
-            const queueData: QueueData = existingData ? JSON.parse(existingData) : { messages: [] };
-            queueData.messages.push(message);
-            await this.cache.set(key, JSON.stringify(queueData), 0);
+            const data = this.getQueueData(instanceName);
+            data.messages.push(message);
+            this.saveQueueData(instanceName, data);
             this.logger.warn(`Message ${message.id} failed, requeued. Retry: ${message.retryCount}`);
           } else {
             results.push({ messageId: message.id, success: false, error: errorMsg });
@@ -244,11 +201,9 @@ export class QueueService {
       }
 
       if (processed > 0) {
-        const key = this.getQueueKey(instanceName);
-        const existingData = await this.cache.get(key);
-        const queueData: QueueData = existingData ? JSON.parse(existingData) : { messages: [] };
-        queueData.lastProcessedAt = Date.now();
-        await this.cache.set(key, JSON.stringify(queueData), 0);
+        const data = this.getQueueData(instanceName);
+        data.lastProcessedAt = Date.now();
+        this.saveQueueData(instanceName, data);
       }
     } finally {
       this.processingInstances.delete(instanceName);
@@ -264,23 +219,20 @@ export class QueueService {
     };
   }
 
-  private async checkAndWaitForSlot(instanceName: string): Promise<boolean> {
-    const { cache } = this;
-    const key = `rate_limiter:${instanceName}`;
-    const data = await cache.hGet(key, 'data');
-
-    if (!data) {
-      return true;
-    }
-
-    const rateLimitData = typeof data === 'string' ? JSON.parse(data) : data;
-    const config = await this.getConfig(instanceName);
-
+  private async checkAndWaitForSlot(instanceName: string, config: QueueConfigDto): Promise<boolean> {
+    const data = this.getQueueData(instanceName);
     const now = Date.now();
     const currentSecond = Math.floor(now / 1000);
     const currentMinute = Math.floor(now / 60000);
     const currentHour = Math.floor(now / 3600000);
     const currentDay = Math.floor(now / 86400000);
+
+    const rateLimitData = (data as any).rateLimitData || {
+      second: [],
+      minute: [],
+      hour: [],
+      day: [],
+    };
 
     const secondMessages = (rateLimitData.second || []).filter((ts: number) => ts >= currentSecond);
     const minuteMessages = (rateLimitData.minute || []).filter((ts: number) => ts >= currentMinute);
@@ -312,19 +264,7 @@ export class QueueService {
 
     setInterval(async () => {
       try {
-        const keys = await this.cache.keys('rate_limiter:queue:*');
-        const instanceNames = new Set<string>();
-
-        for (const key of keys) {
-          if (key.includes('rate_limiter:queue:') && !key.includes('config:') && !key.includes('status:')) {
-            const match = key.match(/rate_limiter:queue:([^:]+)$/);
-            if (match) {
-              instanceNames.add(match[1]);
-            }
-          }
-        }
-
-        for (const instanceName of instanceNames) {
+        for (const instanceName of this.queueData.keys()) {
           const config = await this.getConfig(instanceName);
           if (config.autoProcess) {
             await this.processQueue(instanceName);

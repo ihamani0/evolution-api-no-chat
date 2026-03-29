@@ -236,14 +236,35 @@ export class QueueService {
     let failed = 0;
 
     try {
-      const status = await this.getStatus(instanceName);
-      let remaining = status.count;
+      const queueStatus = await this.getStatus(instanceName);
+      const rateStatus = await this.rateLimiterService.getStatus(instanceName);
+      let remaining = queueStatus.count;
+
+      this.logger.log(
+        'Processing queue for ' +
+          instanceName +
+          ': ' +
+          remaining +
+          ' messages in queue, remainingThisMinute: ' +
+          rateStatus.remainingThisMinute,
+      );
 
       while (processed < limit && remaining > 0) {
+        if (rateStatus.remainingThisMinute <= 0) {
+          this.logger.log(
+            'Per-minute rate limit reached for instance ' +
+              instanceName +
+              ' (' +
+              rateStatus.remainingThisMinute +
+              ' remaining), waiting for next cycle',
+          );
+          break;
+        }
+
         const { canSend } = await this.rateLimiterService.checkLimit(instanceName);
 
         if (!canSend) {
-          this.logger.log(`Rate limit reached for instance ${instanceName}, waiting for next cycle`);
+          this.logger.log('Rate limit reached for instance ' + instanceName + ', waiting for next cycle');
           break;
         }
 
@@ -351,8 +372,12 @@ export class QueueService {
           where: { connectionStatus: 'open' },
         });
 
+        this.logger.log('Auto-process checking ' + instances.length + ' instances');
+
         for (const instance of instances) {
           const config = await this.getConfig(instance.name);
+          this.logger.log('Instance ' + instance.name + ': autoProcess=' + config.autoProcess);
+
           if (config.autoProcess) {
             await this.processQueue(instance.name);
           }

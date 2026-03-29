@@ -309,13 +309,24 @@ export class QueueService {
       throw new Error(`Instance ${instanceName} not found in waMonitor`);
     }
 
+    const waInstance = this.waMonitor.waInstances[instanceName];
+    const config = await this.rateLimiterService.getConfig(instanceName);
+
+    try {
+      if (config.humanLikeBehavior) {
+        await waInstance.simulateHumanBehavior(message.number, msgContent, config);
+      }
+    } catch (error) {
+      this.logger.warn('Human behavior simulation failed for queued message: ' + error);
+    }
+
     switch (message.messageType) {
       case 'text': {
         const sendData: SendTextDto = {
           number: message.number,
           text: msgContent?.text || msgContent?.conversation || JSON.stringify(msgContent),
         };
-        await this.waMonitor.waInstances[instanceName].textMessage(sendData);
+        await waInstance.textMessage(sendData);
         break;
       }
       default: {
@@ -324,7 +335,7 @@ export class QueueService {
           number: message.number,
           text: JSON.stringify(msgContent),
         };
-        await this.waMonitor.waInstances[instanceName].textMessage(fallbackData);
+        await waInstance.textMessage(fallbackData);
       }
     }
 

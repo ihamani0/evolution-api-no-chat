@@ -7,6 +7,13 @@ export class RateLimiterConfigDto {
   delayBetweenMessages?: number;
   maxRetries?: number;
   backoffMultiplier?: number;
+  // Human-like behavior options
+  humanLikeBehavior?: boolean;
+  typingSpeedMsPerChar?: number;
+  minRandomVariation?: number;
+  maxRandomVariation?: number;
+  maxTypingDelayMs?: number;
+  markAsReadBeforeSend?: boolean;
 }
 
 export class RateLimiterStatusDto {

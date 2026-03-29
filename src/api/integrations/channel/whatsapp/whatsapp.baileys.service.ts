@@ -2306,6 +2306,64 @@ export class BaileysStartupService extends ChannelStartupService {
     return 'unknown';
   }
 
+  private async simulateHumanBehavior(sender: string, messagePayload: any, config: any): Promise<void> {
+    if (!config.humanLikeBehavior) {
+      return;
+    }
+
+    try {
+      if (config.markAsReadBeforeSend !== false && messagePayload?.key) {
+        await this.client.readMessages([messagePayload.key]);
+      }
+
+      await this.client.presenceSubscribe(sender);
+      await this.client.sendPresenceUpdate('composing', sender);
+
+      const payloadSize = JSON.stringify(messagePayload).length;
+      const typingSpeed = config.typingSpeedMsPerChar || 50;
+      const baseDelay = payloadSize * typingSpeed;
+
+      const minVar = config.minRandomVariation || 0.5;
+      const maxVar = config.maxRandomVariation || 1.5;
+      const randomMultiplier = minVar + Math.random() * (maxVar - minVar);
+      const randomDelay = baseDelay * randomMultiplier;
+
+      const maxDelay = config.maxTypingDelayMs || 5000;
+      const finalDelay = Math.min(randomDelay, maxDelay);
+
+      await delay(finalDelay);
+
+      await this.client.sendPresenceUpdate('paused', sender);
+    } catch (error) {
+      this.logger.warn('Human behavior simulation failed: ' + error);
+    }
+  }
+
+  public async sendHumanLikeMessage(instanceName: string, number: string, messagePayload: any): Promise<void> {
+    const waInstance = waMonitor.waInstances[instanceName];
+    if (!waInstance) {
+      throw new Error(`Instance ${instanceName} not found`);
+    }
+
+    const config = await rateLimiterService.getConfig(instanceName);
+
+    const isWA = await waInstance.whatsappNumber({ numbers: [number] });
+    if (!isWA?.exists) {
+      throw new Error('Number not on WhatsApp');
+    }
+
+    const sender = isWA.jid.toLowerCase();
+
+    await waInstance.simulateHumanBehavior(sender, messagePayload, config);
+
+    const sendData: SendTextDto = {
+      number,
+      text: messagePayload?.text || messagePayload?.conversation || JSON.stringify(messagePayload),
+    };
+
+    await waInstance.textMessage(sendData);
+  }
+
   private async sendMessageWithTyping<T = proto.IMessage>(
     number: string,
     message: T,
@@ -2313,13 +2371,31 @@ export class BaileysStartupService extends ChannelStartupService {
     isIntegration = false,
   ) {
     const config = await rateLimiterService.getConfig(this.instanceName);
+
     if (config.enabled) {
+      const { queueService } = await import('@api/server.module');
+      const queueStatus = await queueService.getStatus(this.instanceName);
+
+      if (queueStatus.count > 0) {
+        const messageType = this.detectMessageType(message);
+        const queuedMsg = {
+          instanceName: this.instanceName,
+          number,
+          messageType,
+          messagePayload: { message, options },
+        };
+        const result = await queueService.enqueue(this.instanceName, queuedMsg);
+        this.logger.warn(
+          `Queue has ${queueStatus.count} messages. Queueing new message to maintain order. Position: ${result.position}`,
+        );
+        return { queued: true, messageId: result.messageId, position: result.position };
+      }
+
       const { canSend, waitTime } = await rateLimiterService.checkLimit(this.instanceName);
       if (!canSend) {
         this.logger.warn(`Rate limit reached for instance ${this.instanceName}, waiting ${waitTime}ms`);
         const canWait = await rateLimiterService.waitForSlot(this.instanceName, config.delayBetweenMessages || 2000);
         if (!canWait) {
-          const { queueService } = await import('@api/server.module');
           const messageType = this.detectMessageType(message);
           const queuedMsg = {
             instanceName: this.instanceName,
@@ -2350,7 +2426,9 @@ export class BaileysStartupService extends ChannelStartupService {
     this.logger.verbose(`Sending message to ${sender}`);
 
     try {
-      if (options?.delay) {
+      if (config.humanLikeBehavior) {
+        await this.simulateHumanBehavior(sender, message, config);
+      } else if (options?.delay) {
         this.logger.verbose(`Typing for ${options.delay}ms to ${sender}`);
         if (options.delay > 20000) {
           let remainingDelay = options.delay;

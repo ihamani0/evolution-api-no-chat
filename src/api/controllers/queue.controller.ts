@@ -1,5 +1,5 @@
 import { InstanceDto } from '@api/dto/instance.dto';
-import { QueueConfigDto, QueueStatusDto, ProcessQueueResultDto, QueueMessageDto } from '@api/dto/queue.dto';
+import { ProcessQueueResultDto, QueueConfigDto, QueueMessageDto, QueueStatusDto } from '@api/dto/queue.dto';
 import { QueueService } from '@api/services/queue.service';
 
 export class QueueController {

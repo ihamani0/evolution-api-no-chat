@@ -42,10 +42,10 @@ import { S3Service } from './integrations/storage/s3/services/s3.service';
 import { ProviderFiles } from './provider/sessions';
 import { PrismaRepository } from './repository/repository.service';
 import { CacheService } from './services/cache.service';
-import { QueueService } from './services/queue.service';
-import { RateLimiterService } from './services/rate-limiter.service';
 import { WAMonitoringService } from './services/monitor.service';
 import { ProxyService } from './services/proxy.service';
+import { QueueService } from './services/queue.service';
+import { RateLimiterService } from './services/rate-limiter.service';
 import { SettingsService } from './services/settings.service';
 import { TemplateService } from './services/template.service';
 
@@ -59,11 +59,6 @@ if (configService.get<Chatwoot>('CHATWOOT').ENABLED) {
 export const cache = new CacheService(new CacheEngine(configService, 'instance').getEngine());
 const baileysCache = new CacheService(new CacheEngine(configService, 'baileys').getEngine());
 export const rateLimiterService = new RateLimiterService(cache);
-export const queueService = new QueueService();
-
-queueService.startAutoProcess().catch((err) => {
-  console.error('Failed to start queue auto-process:', err);
-});
 
 let providerFiles: ProviderFiles = null;
 if (configService.get<ProviderSession>('PROVIDER').ENABLED) {
@@ -81,6 +76,12 @@ export const waMonitor = new WAMonitoringService(
   chatwootCache,
   baileysCache,
 );
+
+export const queueService = new QueueService(prismaRepository, waMonitor, rateLimiterService);
+
+queueService.startAutoProcess().catch((err) => {
+  console.error('Failed to start queue auto-process:', err);
+});
 
 const s3Service = new S3Service(prismaRepository);
 export const s3Controller = new S3Controller(s3Service);

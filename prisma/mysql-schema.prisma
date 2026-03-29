@@ -111,6 +111,7 @@ model Instance {
   Evoai                   Evoai[]
   EvoaiSetting            EvoaiSetting?
   Pusher                  Pusher?
+  QueuedMessage           QueuedMessage[]
 }
 
 model Session {
@@ -235,8 +236,27 @@ model Chatwoot {
   ignoreJids              Json?
   createdAt               DateTime? @default(dbgenerated("CURRENT_TIMESTAMP")) @db.Timestamp
   updatedAt               DateTime  @updatedAt @db.Timestamp
-  Instance                Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  instanceId              String    @unique
+  Instance        Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  instanceId      String    @unique
+}
+
+model QueuedMessage {
+  id              String    @id @default(cuid())
+  instanceName    String    @db.VarChar(255)
+  number          String    @db.VarChar(100)
+  messageType     String    @db.VarChar(50)
+  messagePayload  Json      @db.Json
+  retryCount      Int       @default(0)
+  queuedAt        DateTime  @default(now()) @db.Timestamp
+  sentAt          DateTime? @db.Timestamp
+  failedAt        DateTime? @db.Timestamp
+  errorMessage    String?   @db.Text
+  instance        Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  instanceId      String    @db.VarChar(100)
+
+  @@index([instanceId])
+  @@index([instanceName])
+  @@index([queuedAt])
 }
 
 model Label {

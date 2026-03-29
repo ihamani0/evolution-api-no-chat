@@ -20,15 +20,6 @@ services:
     expose:
       - "8080"
 
-  frontend:
-    container_name: evolution_frontend
-    image: evoapicloud/evolution-manager:latest
-    restart: always
-    ports:
-      - "3000:80"
-    networks:
-      - evolution-net
-
   redis:
     container_name: evolution_redis
     image: redis:latest
@@ -64,6 +55,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - evolution-net
+    ports:
+      - "5432:5432"
     expose:
       - "5432"
 

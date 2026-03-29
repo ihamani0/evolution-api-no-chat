@@ -1,20 +1,22 @@
+import { EnqueueResultDto, ProcessQueueResultDto, QueueConfigDto, QueueStatusDto } from '@api/dto/queue.dto';
+import { SendTextDto } from '@api/dto/sendMessage.dto';
+import { PrismaRepository } from '@api/repository/repository.service';
+import { WAMonitoringService } from '@api/services/monitor.service';
+import { RateLimiterService } from '@api/services/rate-limiter.service';
 import { Logger } from '@config/logger.config';
-import { QueueConfigDto, QueueStatusDto, ProcessQueueResultDto, EnqueueResultDto } from '@api/dto/queue.dto';
-import { v4 } from 'uuid';
 
-export interface QueuedMessage {
+interface QueuedMessageData {
   id: string;
   instanceName: string;
   number: string;
   messageType: string;
-  messagePayload: Record<string, any>;
+  messagePayload: {
+    message: any;
+    options?: any;
+  };
   queuedAt: number;
   retryCount: number;
-}
-
-interface QueueData {
-  messages: QueuedMessage[];
-  lastProcessedAt?: number;
+  instanceId?: string;
 }
 
 export class QueueService {
@@ -27,36 +29,31 @@ export class QueueService {
     autoProcess: true,
   };
 
+  private configCache: Map<string, QueueConfigDto> = new Map();
   private processingInstances: Set<string> = new Set();
 
-  private queueData: Map<string, QueueData> = new Map();
-
-  private getQueueData(instanceName: string): QueueData {
-    if (!this.queueData.has(instanceName)) {
-      this.queueData.set(instanceName, { messages: [], lastProcessedAt: undefined });
-    }
-    return this.queueData.get(instanceName)!;
-  }
-
-  private saveQueueData(instanceName: string, data: QueueData): void {
-    this.queueData.set(instanceName, data);
-  }
+  constructor(
+    private readonly prismaRepository: PrismaRepository,
+    private readonly waMonitor: WAMonitoringService,
+    private readonly rateLimiterService: RateLimiterService,
+  ) {}
 
   async getConfig(instanceName: string): Promise<QueueConfigDto> {
-    const data = this.getQueueData(instanceName);
-    const config = (data as any).config;
-    return config || this.defaultConfig;
+    if (this.configCache.has(instanceName)) {
+      return this.configCache.get(instanceName)!;
+    }
+    return this.defaultConfig;
   }
 
   async setConfig(instanceName: string, config: QueueConfigDto): Promise<void> {
-    const data = this.getQueueData(instanceName);
-    (data as any).config = { ...this.defaultConfig, ...config };
-    this.saveQueueData(instanceName, data);
+    const mergedConfig = { ...this.defaultConfig, ...config };
+    this.configCache.set(instanceName, mergedConfig);
+    this.logger.log(`Queue config set for instance ${instanceName}`);
   }
 
   async enqueue(
     instanceName: string,
-    message: Omit<QueuedMessage, 'id' | 'queuedAt' | 'retryCount'>,
+    message: Omit<QueuedMessageData, 'id' | 'queuedAt' | 'retryCount'>,
   ): Promise<EnqueueResultDto> {
     const config = await this.getConfig(instanceName);
 
@@ -64,89 +61,168 @@ export class QueueService {
       return { queued: false };
     }
 
-    const data = this.getQueueData(instanceName);
-    const queuedMessage: QueuedMessage = {
-      ...message,
-      id: v4(),
-      queuedAt: Date.now(),
-      retryCount: 0,
-    };
+    try {
+      const instance = await this.prismaRepository.instance.findUnique({
+        where: { name: instanceName },
+      });
 
-    data.messages.push(queuedMessage);
-    this.saveQueueData(instanceName, data);
+      if (!instance) {
+        this.logger.error('Instance ' + instanceName + ' not found');
+        return { queued: false };
+      }
 
-    const position = data.messages.length;
+      const queuedMessage = await this.prismaRepository.queuedMessage.create({
+        data: {
+          instanceName: instanceName,
+          number: message.number,
+          messageType: message.messageType,
+          messagePayload: message.messagePayload,
+          retryCount: 0,
+          instanceId: instance.id,
+        },
+      });
 
-    this.logger.log(`Message ${queuedMessage.id} queued for instance ${instanceName}. Position: ${position}`);
+      const count = await this.prismaRepository.queuedMessage.count({
+        where: { instanceName },
+      });
 
-    return {
-      queued: true,
-      messageId: queuedMessage.id,
-      position: position,
-    };
+      this.logger.log(`Message ${queuedMessage.id} queued for instance ${instanceName}. Position: ${count}`);
+
+      return {
+        queued: true,
+        messageId: queuedMessage.id,
+        position: count,
+      };
+    } catch (error) {
+      this.logger.error('Error enqueuing message: ' + error);
+      return { queued: false };
+    }
   }
 
-  async dequeue(instanceName: string): Promise<QueuedMessage | null> {
-    const data = this.getQueueData(instanceName);
+  async dequeue(instanceName: string): Promise<QueuedMessageData | null> {
+    try {
+      const message = await this.prismaRepository.queuedMessage.findFirst({
+        where: { instanceName },
+        orderBy: { queuedAt: 'asc' },
+      });
 
-    if (data.messages.length === 0) {
+      if (!message) {
+        return null;
+      }
+
+      return {
+        id: message.id,
+        instanceName: message.instanceName,
+        number: message.number,
+        messageType: message.messageType,
+        messagePayload: message.messagePayload as any,
+        queuedAt: message.queuedAt.getTime(),
+        retryCount: message.retryCount,
+        instanceId: message.instanceId,
+      };
+    } catch (error) {
+      this.logger.error('Error dequeuing message: ' + error);
       return null;
     }
-
-    const message = data.messages.shift()!;
-    this.saveQueueData(instanceName, data);
-
-    return message;
   }
 
-  async peek(instanceName: string): Promise<QueuedMessage | null> {
-    const data = this.getQueueData(instanceName);
+  async peek(instanceName: string): Promise<QueuedMessageData | null> {
+    try {
+      const message = await this.prismaRepository.queuedMessage.findFirst({
+        where: { instanceName },
+        orderBy: { queuedAt: 'asc' },
+      });
 
-    if (data.messages.length === 0) {
+      if (!message) {
+        return null;
+      }
+
+      return {
+        id: message.id,
+        instanceName: message.instanceName,
+        number: message.number,
+        messageType: message.messageType,
+        messagePayload: message.messagePayload as any,
+        queuedAt: message.queuedAt.getTime(),
+        retryCount: message.retryCount,
+        instanceId: message.instanceId,
+      };
+    } catch (error) {
+      this.logger.error('Error peeking message: ' + error);
       return null;
     }
-
-    return data.messages[0] || null;
   }
 
-  async getAllMessages(instanceName: string): Promise<QueuedMessage[]> {
-    const data = this.getQueueData(instanceName);
-    return [...data.messages];
+  async getAllMessages(instanceName: string): Promise<QueuedMessageData[]> {
+    try {
+      const messages = await this.prismaRepository.queuedMessage.findMany({
+        where: { instanceName },
+        orderBy: { queuedAt: 'asc' },
+      });
+
+      return messages.map((msg) => ({
+        id: msg.id,
+        instanceName: msg.instanceName,
+        number: msg.number,
+        messageType: msg.messageType,
+        messagePayload: msg.messagePayload as any,
+        queuedAt: msg.queuedAt.getTime(),
+        retryCount: msg.retryCount,
+        instanceId: msg.instanceId,
+      }));
+    } catch (error) {
+      this.logger.error('Error getting all messages: ' + error);
+      return [];
+    }
   }
 
   async getStatus(instanceName: string): Promise<QueueStatusDto> {
-    const data = this.getQueueData(instanceName);
-    return {
-      count: data.messages.length,
-      lastProcessedAt: data.lastProcessedAt || null,
-    };
+    try {
+      const count = await this.prismaRepository.queuedMessage.count({
+        where: { instanceName },
+      });
+
+      const lastMessage = await this.prismaRepository.queuedMessage.findFirst({
+        where: { instanceName },
+        orderBy: { queuedAt: 'desc' },
+      });
+
+      return {
+        count,
+        lastProcessedAt: lastMessage?.queuedAt?.getTime() || null,
+      };
+    } catch (error) {
+      this.logger.error('Error getting queue status: ' + error);
+      return { count: 0, lastProcessedAt: null };
+    }
   }
 
   async clear(instanceName: string): Promise<void> {
-    const data = this.getQueueData(instanceName);
-    data.messages = [];
-    data.lastProcessedAt = undefined;
-    this.saveQueueData(instanceName, data);
-    this.logger.log(`Queue cleared for instance ${instanceName}`);
+    try {
+      await this.prismaRepository.queuedMessage.deleteMany({
+        where: { instanceName },
+      });
+      this.logger.log('Queue cleared for instance ' + instanceName);
+    } catch (error) {
+      this.logger.error('Error clearing queue: ' + error);
+    }
   }
 
   async removeMessage(instanceName: string, messageId: string): Promise<boolean> {
-    const data = this.getQueueData(instanceName);
-    const originalLength = data.messages.length;
-
-    data.messages = data.messages.filter((msg) => msg.id !== messageId);
-
-    if (data.messages.length === originalLength) {
+    try {
+      await this.prismaRepository.queuedMessage.delete({
+        where: { id: messageId },
+      });
+      return true;
+    } catch (error) {
+      this.logger.error('Error removing message: ' + error);
       return false;
     }
-
-    this.saveQueueData(instanceName, data);
-    return true;
   }
 
   async processQueue(instanceName: string, maxMessages?: number): Promise<ProcessQueueResultDto> {
     if (this.processingInstances.has(instanceName)) {
-      this.logger.warn(`Already processing queue for instance ${instanceName}`);
+      this.logger.warn('Already processing queue for instance ' + instanceName);
       return { processed: 0, remaining: 0, failed: 0 };
     }
 
@@ -164,7 +240,7 @@ export class QueueService {
       let remaining = status.count;
 
       while (processed < limit && remaining > 0) {
-        const canSend = await this.checkAndWaitForSlot(instanceName, config);
+        const { canSend } = await this.rateLimiterService.checkLimit(instanceName);
 
         if (!canSend) {
           this.logger.log(`Rate limit reached for instance ${instanceName}, waiting for next cycle`);
@@ -179,31 +255,36 @@ export class QueueService {
 
         try {
           await this.sendMessage(instanceName, message);
+
+          await this.prismaRepository.queuedMessage.delete({
+            where: { id: message.id },
+          });
+
+          await this.rateLimiterService.recordMessage(instanceName);
+
           processed++;
-          this.logger.log(`Processed queued message ${message.id} for instance ${instanceName}`);
+          this.logger.log(`Processed and deleted queued message ${message.id} for instance ${instanceName}`);
         } catch (error) {
           failed++;
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
 
           if (message.retryCount < (config.maxRetries || 3)) {
-            message.retryCount++;
-            const data = this.getQueueData(instanceName);
-            data.messages.push(message);
-            this.saveQueueData(instanceName, data);
-            this.logger.warn(`Message ${message.id} failed, requeued. Retry: ${message.retryCount}`);
+            await this.prismaRepository.queuedMessage.update({
+              where: { id: message.id },
+              data: { retryCount: message.retryCount + 1 },
+            });
+            this.logger.warn(`Message ${message.id} failed, will retry. Retry: ${message.retryCount + 1}`);
           } else {
+            await this.prismaRepository.queuedMessage.update({
+              where: { id: message.id },
+              data: { failedAt: new Date(), errorMessage: errorMsg },
+            });
             results.push({ messageId: message.id, success: false, error: errorMsg });
             this.logger.error(`Message ${message.id} failed after max retries: ${errorMsg}`);
           }
         }
 
         remaining = (await this.getStatus(instanceName)).count;
-      }
-
-      if (processed > 0) {
-        const data = this.getQueueData(instanceName);
-        data.lastProcessedAt = Date.now();
-        this.saveQueueData(instanceName, data);
       }
     } finally {
       this.processingInstances.delete(instanceName);
@@ -219,44 +300,35 @@ export class QueueService {
     };
   }
 
-  private async checkAndWaitForSlot(instanceName: string, config: QueueConfigDto): Promise<boolean> {
-    const data = this.getQueueData(instanceName);
-    const now = Date.now();
-    const currentSecond = Math.floor(now / 1000);
-    const currentMinute = Math.floor(now / 60000);
-    const currentHour = Math.floor(now / 3600000);
-    const currentDay = Math.floor(now / 86400000);
+  private async sendMessage(instanceName: string, message: QueuedMessageData): Promise<void> {
+    this.logger.log(`Sending queued message ${message.id} to ${message.number} (type: ${message.messageType})`);
 
-    const rateLimitData = (data as any).rateLimitData || {
-      second: [],
-      minute: [],
-      hour: [],
-      day: [],
-    };
+    const { message: msgContent } = message.messagePayload;
 
-    const secondMessages = (rateLimitData.second || []).filter((ts: number) => ts >= currentSecond);
-    const minuteMessages = (rateLimitData.minute || []).filter((ts: number) => ts >= currentMinute);
-    const hourMessages = (rateLimitData.hour || []).filter((ts: number) => ts >= currentHour);
-    const dayMessages = (rateLimitData.day || []).filter((ts: number) => ts >= currentDay);
-
-    if (config.messagesPerSecond && secondMessages.length >= config.messagesPerSecond) {
-      return false;
-    }
-    if (config.messagesPerMinute && minuteMessages.length >= config.messagesPerMinute) {
-      return false;
-    }
-    if (config.messagesPerHour && hourMessages.length >= config.messagesPerHour) {
-      return false;
-    }
-    if (config.messagesPerDay && dayMessages.length >= config.messagesPerDay) {
-      return false;
+    if (!this.waMonitor.waInstances[instanceName]) {
+      throw new Error(`Instance ${instanceName} not found in waMonitor`);
     }
 
-    return true;
-  }
+    switch (message.messageType) {
+      case 'text': {
+        const sendData: SendTextDto = {
+          number: message.number,
+          text: msgContent?.text || msgContent?.conversation || JSON.stringify(msgContent),
+        };
+        await this.waMonitor.waInstances[instanceName].textMessage(sendData);
+        break;
+      }
+      default: {
+        this.logger.warn(`Unknown message type: ${message.messageType}, using text fallback`);
+        const fallbackData: SendTextDto = {
+          number: message.number,
+          text: JSON.stringify(msgContent),
+        };
+        await this.waMonitor.waInstances[instanceName].textMessage(fallbackData);
+      }
+    }
 
-  private async sendMessage(instanceName: string, message: QueuedMessage): Promise<void> {
-    this.logger.log(`Sending queued message ${message.id} to ${message.number}`);
+    this.logger.log(`Successfully sent message ${message.id} to ${message.number}`);
   }
 
   async startAutoProcess(): Promise<void> {
@@ -264,14 +336,18 @@ export class QueueService {
 
     setInterval(async () => {
       try {
-        for (const instanceName of this.queueData.keys()) {
-          const config = await this.getConfig(instanceName);
+        const instances = await this.prismaRepository.instance.findMany({
+          where: { connectionStatus: 'open' },
+        });
+
+        for (const instance of instances) {
+          const config = await this.getConfig(instance.name);
           if (config.autoProcess) {
-            await this.processQueue(instanceName);
+            await this.processQueue(instance.name);
           }
         }
       } catch (error) {
-        this.logger.error(error);
+        this.logger.error('Auto process error: ' + error);
       }
     }, this.defaultConfig.processInterval || 30000);
   }

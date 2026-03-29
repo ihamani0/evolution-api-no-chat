@@ -1,6 +1,5 @@
 import { getCollectionsDto } from '@api/dto/business.dto';
 import { OfferCallDto } from '@api/dto/call.dto';
-import { rateLimiterService } from '@api/server.module';
 import {
   ArchiveChatDto,
   BlockUserDto,
@@ -57,7 +56,7 @@ import { chatwootImport } from '@api/integrations/chatbot/chatwoot/utils/chatwoo
 import * as s3Service from '@api/integrations/storage/s3/libs/minio.server';
 import { ProviderFiles } from '@api/provider/sessions';
 import { PrismaRepository, Query } from '@api/repository/repository.service';
-import { chatbotController, waMonitor } from '@api/server.module';
+import { chatbotController, rateLimiterService, waMonitor } from '@api/server.module';
 import { CacheService } from '@api/services/cache.service';
 import { ChannelStartupService } from '@api/services/channel.service';
 import { Events, MessageSubtype, TypeMediaMessage, wa } from '@api/types/wa.types';
@@ -2287,6 +2286,26 @@ export class BaileysStartupService extends ChannelStartupService {
     );
   }
 
+  private detectMessageType(message: any): string {
+    if (!message) return 'unknown';
+    if (message.conversation) return 'text';
+    if (message.extendedTextMessage) return 'text';
+    if (message.imageMessage) return 'image';
+    if (message.videoMessage) return 'video';
+    if (message.audioMessage) return 'audio';
+    if (message.documentMessage) return 'document';
+    if (message.stickerMessage) return 'sticker';
+    if (message.contactMessage) return 'contact';
+    if (message.locationMessage) return 'location';
+    if (message.listMessage) return 'list';
+    if (message.buttonsMessage) return 'buttons';
+    if (message.templateMessage) return 'template';
+    if (message.reactionMessage) return 'reaction';
+    if (message.pollUpdateMessage) return 'poll';
+    if (message.statusUpdateMessage) return 'status';
+    return 'unknown';
+  }
+
   private async sendMessageWithTyping<T = proto.IMessage>(
     number: string,
     message: T,
@@ -2301,10 +2320,11 @@ export class BaileysStartupService extends ChannelStartupService {
         const canWait = await rateLimiterService.waitForSlot(this.instanceName, config.delayBetweenMessages || 2000);
         if (!canWait) {
           const { queueService } = await import('@api/server.module');
+          const messageType = this.detectMessageType(message);
           const queuedMsg = {
             instanceName: this.instanceName,
             number,
-            messageType: 'unknown',
+            messageType,
             messagePayload: { message, options },
           };
           const result = await queueService.enqueue(this.instanceName, queuedMsg);

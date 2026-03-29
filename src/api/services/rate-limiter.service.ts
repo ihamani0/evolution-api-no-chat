@@ -1,6 +1,6 @@
-import { Logger } from '@config/logger.config';
 import { RateLimiterConfigDto, RateLimiterStatusDto } from '@api/dto/rate-limiter.dto';
 import { CacheService } from '@api/services/cache.service';
+import { Logger } from '@config/logger.config';
 
 interface RateLimitData {
   second: number[];

@@ -55,8 +55,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - evolution-net
-    ports:
-      - "5432:5432"
     expose:
       - "5432"
 

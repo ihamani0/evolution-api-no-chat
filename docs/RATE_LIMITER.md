@@ -231,6 +231,8 @@ curl -X DELETE "{{baseUrl}}/rate-limiter/queue/message/msg_abc123?instanceName=i
 
 ## Configuration Options
 
+### Rate Limiting
+
 | Parameter | Type | Default | Range | Description |
 |-----------|------|---------|-------|-------------|
 | `enabled` | boolean | `true` | - | Enable rate limiting |
@@ -239,6 +241,55 @@ curl -X DELETE "{{baseUrl}}/rate-limiter/queue/message/msg_abc123?instanceName=i
 | `messagesPerHour` | integer | `200` | 1-5000 | Max messages/hour |
 | `messagesPerDay` | integer | `1000` | 1-50000 | Max messages/day |
 | `delayBetweenMessages` | integer | `2000` | 0-60000 | Delay between messages (ms) |
+
+### Human-Like Behavior
+
+Simulate human typing to avoid WhatsApp bot detection.
+
+| Parameter | Type | Default | Range | Description |
+|-----------|------|---------|-------|-------------|
+| `humanLikeBehavior` | boolean | `true` | - | Enable typing simulation |
+| `typingSpeedMsPerChar` | integer | `50` | 10-200 | Base typing speed (ms per character) |
+| `minRandomVariation` | number | `0.5` | 0.1-1.0 | Min random multiplier (50% = 0.5) |
+| `maxRandomVariation` | number | `1.5` | 1.0-2.0 | Max random multiplier (150% = 1.5) |
+| `maxTypingDelayMs` | integer | `5000` | 1000-30000 | Max delay cap (ms) |
+| `markAsReadBeforeSend` | boolean | `true` | - | Mark message as read before replying |
+
+**Example - Full Configuration:**
+```json
+{
+  "enabled": true,
+  "messagesPerMinute": 30,
+  "messagesPerHour": 200,
+  "messagesPerDay": 1000,
+  "delayBetweenMessages": 2000,
+  "humanLikeBehavior": true,
+  "typingSpeedMsPerChar": 50,
+  "minRandomVariation": 0.5,
+  "maxRandomVariation": 1.5,
+  "maxTypingDelayMs": 5000,
+  "markAsReadBeforeSend": true
+}
+```
+
+**How Human-Like Behavior Works:**
+
+1. **Send "seen"** - Mark incoming message as read before replying
+2. **Start typing** - Show "typing" indicator
+3. **Random delay** - Wait based on message size with random variation:
+   - Calculate: `payloadSize × typingSpeedMsPerChar`
+   - Apply random variation: `× (minRandomVariation to maxRandomVariation)`
+   - Cap at: `maxTypingDelayMs`
+4. **Stop typing** - Hide typing indicator
+5. **Send message** - Send the actual WhatsApp message
+
+**Example:**
+- Message payload: 100 characters
+- Typing speed: 50ms/char
+- Base delay: 100 × 50 = 5000ms
+- Random variation (0.5 - 1.5): 2500ms - 7500ms
+- Capped at 5000ms
+- Actual delay: Random between 2500-5000ms
 
 ---
 

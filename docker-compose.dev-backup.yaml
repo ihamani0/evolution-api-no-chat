@@ -1,17 +1,41 @@
 version: "3.8"
 
 services:
+  api:
+    container_name: evolution_api
+    image: ihamani0/evolution-api:latest
+    restart: always
+    depends_on:
+      - redis
+      - evolution-postgres
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - evolution-net
+      - shared-net
+    env_file:
+      - .env
+    expose:
+      - "8080"
+
   redis:
     container_name: evolution_redis
     image: redis:latest
     restart: always
-    command: redis-server --port 6379 --appendonly yes
+    command: >
+      redis-server --port 6379 --appendonly yes
     volumes:
       - evolution_redis:/data
     networks:
-      - evolution-net
+      evolution-net:
+        aliases:
+          - evolution-redis
     ports:
       - "6379:6379"
+    expose:
+      - "6379"
 
   evolution-postgres:
     container_name: evolution_postgres
@@ -35,11 +59,17 @@ services:
       - evolution-net
     ports:
       - "5430:5432"
+    expose:
+      - "5432"
 
 volumes:
+  evolution_instances:
   evolution_redis:
   postgres_data:
 
 networks:
   evolution-net:
+    name: evolution-net
     driver: bridge
+  shared-net:
+    external: true

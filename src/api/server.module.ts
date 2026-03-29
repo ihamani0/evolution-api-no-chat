@@ -79,9 +79,13 @@ export const waMonitor = new WAMonitoringService(
 
 export const queueService = new QueueService(prismaRepository, waMonitor, rateLimiterService);
 
-queueService.startAutoProcess().catch((err) => {
-  console.error('Failed to start queue auto-process:', err);
-});
+console.log('[QUEUE-SERVICE] QueueService created, starting auto-process...');
+queueService
+  .startAutoProcess()
+  .then(() => console.log('[QUEUE-SERVICE] Auto-process started successfully'))
+  .catch((err) => {
+    console.error('[QUEUE-SERVICE] Failed to start queue auto-process:', err);
+  });
 
 const s3Service = new S3Service(prismaRepository);
 export const s3Controller = new S3Controller(s3Service);

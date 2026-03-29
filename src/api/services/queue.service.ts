@@ -221,8 +221,12 @@ export class QueueService {
   }
 
   async processQueue(instanceName: string, maxMessages?: number): Promise<ProcessQueueResultDto> {
+    console.log('[QUEUE-DEBUG] processQueue called for ' + instanceName);
+
     if (this.processingInstances.has(instanceName)) {
-      this.logger.warn('Already processing queue for instance ' + instanceName);
+      const msg = 'Already processing queue for instance ' + instanceName;
+      this.logger.warn(msg);
+      console.log('[QUEUE-DEBUG] ' + msg);
       return { processed: 0, remaining: 0, failed: 0 };
     }
 
@@ -230,52 +234,75 @@ export class QueueService {
     const limit = maxMessages || config.maxMessagesPerProcess || 10;
 
     this.processingInstances.add(instanceName);
+    console.log('[QUEUE-DEBUG] Added ' + instanceName + ' to processingInstances');
 
     const results: Array<{ messageId: string; success: boolean; error?: string }> = [];
     let processed = 0;
     let failed = 0;
 
     try {
+      console.log('[QUEUE-DEBUG] Getting status...');
       const queueStatus = await this.getStatus(instanceName);
       const rateStatus = await this.rateLimiterService.getStatus(instanceName);
       let remaining = queueStatus.count;
 
-      this.logger.log(
+      const logMsg =
         'Processing queue for ' +
-          instanceName +
-          ': ' +
-          remaining +
-          ' messages in queue, remainingThisMinute: ' +
-          rateStatus.remainingThisMinute,
-      );
+        instanceName +
+        ': ' +
+        remaining +
+        ' messages, remainingThisMinute: ' +
+        rateStatus.remainingThisMinute +
+        ', remainingThisHour: ' +
+        rateStatus.remainingThisHour;
+      this.logger.log(logMsg);
+      console.log('[QUEUE-DEBUG] ' + logMsg);
 
       while (processed < limit && remaining > 0) {
-        if (rateStatus.remainingThisMinute <= 0) {
-          this.logger.log(
-            'Per-minute rate limit reached for instance ' +
-              instanceName +
-              ' (' +
-              rateStatus.remainingThisMinute +
-              ' remaining), waiting for next cycle',
-          );
-          break;
-        }
+        console.log('[QUEUE-DEBUG] While loop iteration, processed=' + processed + ', remaining=' + remaining);
 
+        // Get fresh rate status for each iteration
+        const currentRateStatus = await this.rateLimiterService.getStatus(instanceName);
         const { canSend } = await this.rateLimiterService.checkLimit(instanceName);
 
-        if (!canSend) {
-          this.logger.log('Rate limit reached for instance ' + instanceName + ', waiting for next cycle');
+        console.log(
+          '[QUEUE-DEBUG] canSend=' +
+            canSend +
+            ', remainingThisMinute=' +
+            currentRateStatus.remainingThisMinute +
+            ', remainingThisHour=' +
+            currentRateStatus.remainingThisHour,
+        );
+
+        // Only block if hour or day limits are hit (not minute)
+        // Allow processing when minute limit resets
+        if (!canSend && currentRateStatus.remainingThisHour <= 0) {
+          const msg = 'Hour/Day limit reached for instance ' + instanceName + ', waiting for next cycle';
+          this.logger.log(msg);
+          console.log('[QUEUE-DEBUG] ' + msg);
           break;
         }
 
+        if (!canSend && currentRateStatus.remainingThisMinute <= 0) {
+          const msg = 'Per-minute limit reached, will retry in next cycle';
+          this.logger.log(msg);
+          console.log('[QUEUE-DEBUG] ' + msg);
+          break;
+        }
+
+        console.log('[QUEUE-DEBUG] Dequeuing message...');
         const message = await this.dequeue(instanceName);
 
         if (!message) {
+          console.log('[QUEUE-DEBUG] No message to dequeue');
           break;
         }
 
+        console.log('[QUEUE-DEBUG] Sending message ' + message.id + ' to ' + message.number);
+
         try {
           await this.sendMessage(instanceName, message);
+          console.log('[QUEUE-DEBUG] Message sent, deleting from queue...');
 
           await this.prismaRepository.queuedMessage.delete({
             where: { id: message.id },
@@ -285,9 +312,11 @@ export class QueueService {
 
           processed++;
           this.logger.log(`Processed and deleted queued message ${message.id} for instance ${instanceName}`);
+          console.log('[QUEUE-DEBUG] Message ' + message.id + ' processed and deleted');
         } catch (error) {
           failed++;
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          console.log('[QUEUE-DEBUG] Error processing message: ' + errorMsg);
 
           if (message.retryCount < (config.maxRetries || 3)) {
             await this.prismaRepository.queuedMessage.update({
@@ -307,8 +336,11 @@ export class QueueService {
 
         remaining = (await this.getStatus(instanceName)).count;
       }
+
+      console.log('[QUEUE-DEBUG] While loop ended, processed=' + processed + ', remaining=' + remaining);
     } finally {
       this.processingInstances.delete(instanceName);
+      console.log('[QUEUE-DEBUG] Removed ' + instanceName + ' from processingInstances');
     }
 
     const finalStatus = await this.getStatus(instanceName);
@@ -346,6 +378,7 @@ export class QueueService {
         const sendData: SendTextDto = {
           number: message.number,
           text: msgContent?.text || msgContent?.conversation || JSON.stringify(msgContent),
+          isFromQueue: true,
         };
         await waInstance.textMessage(sendData);
         break;
@@ -355,6 +388,7 @@ export class QueueService {
         const fallbackData: SendTextDto = {
           number: message.number,
           text: JSON.stringify(msgContent),
+          isFromQueue: true,
         };
         await waInstance.textMessage(fallbackData);
       }
@@ -364,26 +398,66 @@ export class QueueService {
   }
 
   async startAutoProcess(): Promise<void> {
-    this.logger.log('Starting auto process scheduler');
+    const loggerMsg = '[QUEUE-AUTO] Starting auto process scheduler';
+    this.logger.log(loggerMsg);
+    console.log(loggerMsg);
 
     setInterval(async () => {
       try {
+        console.log('[QUEUE-AUTO] === AUTO-PROCESS CYCLE START ===');
+
         const instances = await this.prismaRepository.instance.findMany({
           where: { connectionStatus: 'open' },
         });
 
-        this.logger.log('Auto-process checking ' + instances.length + ' instances');
+        const msg = '[QUEUE-AUTO] Found ' + instances.length + ' instances with connectionStatus: open';
+        this.logger.log(msg);
+        console.log(msg);
+
+        if (instances.length === 0) {
+          const allInstances = await this.prismaRepository.instance.findMany({
+            select: { name: true, connectionStatus: true },
+          });
+          const statusMsg =
+            '[QUEUE-AUTO] All instances: ' +
+            JSON.stringify(allInstances.map((i) => ({ name: i.name, status: i.connectionStatus })));
+          this.logger.log(statusMsg);
+          console.log(statusMsg);
+        }
 
         for (const instance of instances) {
           const config = await this.getConfig(instance.name);
-          this.logger.log('Instance ' + instance.name + ': autoProcess=' + config.autoProcess);
+          const configMsg = '[QUEUE-AUTO] Instance: ' + instance.name + ' autoProcess=' + config.autoProcess;
+          this.logger.log(configMsg);
+          console.log(configMsg);
 
           if (config.autoProcess) {
-            await this.processQueue(instance.name);
+            const queueStatus = await this.getStatus(instance.name);
+            const queueMsg = '[QUEUE-AUTO] Queue for ' + instance.name + ': count=' + queueStatus.count;
+            this.logger.log(queueMsg);
+            console.log(queueMsg);
+
+            if (queueStatus.count > 0) {
+              const processMsg = '[QUEUE-AUTO] Calling processQueue for ' + instance.name;
+              this.logger.log(processMsg);
+              console.log(processMsg);
+              await this.processQueue(instance.name);
+            } else {
+              const skipMsg = '[QUEUE-AUTO] No messages in queue for ' + instance.name + ', skipping';
+              this.logger.log(skipMsg);
+              console.log(skipMsg);
+            }
+          } else {
+            const disabledMsg = '[QUEUE-AUTO] Auto-process disabled for ' + instance.name;
+            this.logger.log(disabledMsg);
+            console.log(disabledMsg);
           }
         }
+        console.log('[QUEUE-AUTO] === AUTO-PROCESS CYCLE END ===');
       } catch (error) {
-        this.logger.error('Auto process error: ' + error);
+        const errorMsg = '[QUEUE-AUTO] Auto process error: ' + error;
+        this.logger.error(errorMsg);
+        console.error(errorMsg);
       }
     }, this.defaultConfig.processInterval || 30000);
   }

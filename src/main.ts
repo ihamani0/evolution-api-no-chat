@@ -165,5 +165,5 @@ async function bootstrap() {
 
   onUnexpectedError();
 }
-
+console.log('--------------------Server started--------------------');
 bootstrap();

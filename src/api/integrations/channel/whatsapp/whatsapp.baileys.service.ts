@@ -2312,12 +2312,12 @@ export class BaileysStartupService extends ChannelStartupService {
     }
 
     try {
-      if (config.markAsReadBeforeSend !== false && messagePayload?.key) {
-        await this.client.readMessages([messagePayload.key]);
-      }
+      // Convert phone number to WhatsApp JID format (e.g., 213697096705 -> 213697096705@s.whatsapp.net)
+      const senderJid = createJid(sender);
 
-      await this.client.presenceSubscribe(sender);
-      await this.client.sendPresenceUpdate('composing', sender);
+      // Always do typing simulation
+      await this.client.presenceSubscribe(senderJid);
+      await this.client.sendPresenceUpdate('composing', senderJid);
 
       const payloadSize = JSON.stringify(messagePayload).length;
       const typingSpeed = config.typingSpeedMsPerChar || 50;
@@ -2331,9 +2331,11 @@ export class BaileysStartupService extends ChannelStartupService {
       const maxDelay = config.maxTypingDelayMs || 5000;
       const finalDelay = Math.min(randomDelay, maxDelay);
 
+      this.logger.log('Human behavior: typing for ' + finalDelay + 'ms (' + payloadSize + ' chars)');
+
       await delay(finalDelay);
 
-      await this.client.sendPresenceUpdate('paused', sender);
+      await this.client.sendPresenceUpdate('paused', senderJid);
     } catch (error) {
       this.logger.warn('Human behavior simulation failed: ' + error);
     }
@@ -2373,29 +2375,12 @@ export class BaileysStartupService extends ChannelStartupService {
     const config = await rateLimiterService.getConfig(this.instanceName);
 
     if (config.enabled) {
-      const { queueService } = await import('@api/server.module');
-      const queueStatus = await queueService.getStatus(this.instanceName);
+      // Skip queue check if message is from queue processor
+      if (!options?.isFromQueue) {
+        const { queueService } = await import('@api/server.module');
+        const queueStatus = await queueService.getStatus(this.instanceName);
 
-      if (queueStatus.count > 0) {
-        const messageType = this.detectMessageType(message);
-        const queuedMsg = {
-          instanceName: this.instanceName,
-          number,
-          messageType,
-          messagePayload: { message, options },
-        };
-        const result = await queueService.enqueue(this.instanceName, queuedMsg);
-        this.logger.warn(
-          `Queue has ${queueStatus.count} messages. Queueing new message to maintain order. Position: ${result.position}`,
-        );
-        return { queued: true, messageId: result.messageId, position: result.position };
-      }
-
-      const { canSend, waitTime } = await rateLimiterService.checkLimit(this.instanceName);
-      if (!canSend) {
-        this.logger.warn(`Rate limit reached for instance ${this.instanceName}, waiting ${waitTime}ms`);
-        const canWait = await rateLimiterService.waitForSlot(this.instanceName, config.delayBetweenMessages || 2000);
-        if (!canWait) {
+        if (queueStatus.count > 0) {
           const messageType = this.detectMessageType(message);
           const queuedMsg = {
             instanceName: this.instanceName,
@@ -2404,10 +2389,31 @@ export class BaileysStartupService extends ChannelStartupService {
             messagePayload: { message, options },
           };
           const result = await queueService.enqueue(this.instanceName, queuedMsg);
-          this.logger.warn(`Message queued for instance ${this.instanceName}. Position: ${result.position}`);
+          this.logger.warn(
+            `Queue has ${queueStatus.count} messages. Queueing new message to maintain order. Position: ${result.position}`,
+          );
           return { queued: true, messageId: result.messageId, position: result.position };
         }
+
+        const { canSend, waitTime } = await rateLimiterService.checkLimit(this.instanceName);
+        if (!canSend) {
+          this.logger.warn(`Rate limit reached for instance ${this.instanceName}, waiting ${waitTime}ms`);
+          const canWait = await rateLimiterService.waitForSlot(this.instanceName, config.delayBetweenMessages || 2000);
+          if (!canWait) {
+            const messageType = this.detectMessageType(message);
+            const queuedMsg = {
+              instanceName: this.instanceName,
+              number,
+              messageType,
+              messagePayload: { message, options },
+            };
+            const result = await queueService.enqueue(this.instanceName, queuedMsg);
+            this.logger.warn(`Message queued for instance ${this.instanceName}. Position: ${result.position}`);
+            return { queued: true, messageId: result.messageId, position: result.position };
+          }
+        }
       }
+
       const delay = config.delayBetweenMessages || 2000;
       if (delay > 0) {
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -2768,6 +2774,7 @@ export class BaileysStartupService extends ChannelStartupService {
         linkPreview: data?.linkPreview,
         mentionsEveryOne: data?.mentionsEveryOne,
         mentioned: data?.mentioned,
+        isFromQueue: data?.isFromQueue,
       },
       isIntegration,
     );

@@ -3,10 +3,7 @@ import { CacheService } from '@api/services/cache.service';
 import { Logger } from '@config/logger.config';
 
 interface RateLimitData {
-  second: number[];
-  minute: number[];
-  hour: number[];
-  day: number[];
+  timestamps: number[];
   config: RateLimiterConfigDto;
 }
 
@@ -53,38 +50,41 @@ export class RateLimiterService {
 
     const now = Date.now();
     const data = await this.getRateLimitData(instanceName, config);
-    const currentSecond = Math.floor(now / 1000);
-    const currentMinute = Math.floor(now / 60000);
-    const currentHour = Math.floor(now / 3600000);
-    const currentDay = Math.floor(now / 86400000);
 
-    const secondMessages = data.second.filter((ts) => ts >= currentSecond);
-    const minuteMessages = data.minute.filter((ts) => ts >= currentMinute);
-    const hourMessages = data.hour.filter((ts) => ts >= currentHour);
-    const dayMessages = data.day.filter((ts) => ts >= currentDay);
+    // Sliding window boundaries
+    const oneSecondAgo = now - 1000;
+    const oneMinuteAgo = now - 60000;
+    const oneHourAgo = now - 3600000;
+    const oneDayAgo = now - 86400000;
+
+    // Filter timestamps within each sliding window
+    const secondMessages = data.timestamps.filter((ts) => ts >= oneSecondAgo);
+    const minuteMessages = data.timestamps.filter((ts) => ts >= oneMinuteAgo);
+    const hourMessages = data.timestamps.filter((ts) => ts >= oneHourAgo);
+    const dayMessages = data.timestamps.filter((ts) => ts >= oneDayAgo);
 
     if (config.messagesPerSecond && secondMessages.length >= config.messagesPerSecond) {
       const oldestInSecond = Math.min(...secondMessages);
-      const waitTime = (oldestInSecond + 1 - currentSecond) * 1000;
-      return { canSend: false, waitTime };
+      const waitTime = oldestInSecond + 1000 - now;
+      return { canSend: false, waitTime: Math.max(0, waitTime) };
     }
 
     if (config.messagesPerMinute && minuteMessages.length >= config.messagesPerMinute) {
       const oldestInMinute = Math.min(...minuteMessages);
-      const waitTime = (oldestInMinute + 60 - currentMinute) * 60000;
-      return { canSend: false, waitTime };
+      const waitTime = oldestInMinute + 60000 - now;
+      return { canSend: false, waitTime: Math.max(0, waitTime) };
     }
 
     if (config.messagesPerHour && hourMessages.length >= config.messagesPerHour) {
       const oldestInHour = Math.min(...hourMessages);
-      const waitTime = (oldestInHour + 3600 - currentHour) * 3600000;
-      return { canSend: false, waitTime };
+      const waitTime = oldestInHour + 3600000 - now;
+      return { canSend: false, waitTime: Math.max(0, waitTime) };
     }
 
     if (config.messagesPerDay && dayMessages.length >= config.messagesPerDay) {
       const oldestInDay = Math.min(...dayMessages);
-      const waitTime = (oldestInDay + 86400 - currentDay) * 86400000;
-      return { canSend: false, waitTime };
+      const waitTime = oldestInDay + 86400000 - now;
+      return { canSend: false, waitTime: Math.max(0, waitTime) };
     }
 
     return { canSend: true };
@@ -121,22 +121,14 @@ export class RateLimiterService {
 
     const key = this.getCacheKey(instanceName);
     const now = Date.now();
-    const currentSecond = Math.floor(now / 1000);
-    const currentMinute = Math.floor(now / 60000);
-    const currentHour = Math.floor(now / 3600000);
-    const currentDay = Math.floor(now / 86400000);
 
     const data = await this.getRateLimitData(instanceName, config);
 
-    data.second.push(currentSecond);
-    data.minute.push(currentMinute);
-    data.hour.push(currentHour);
-    data.day.push(currentDay);
+    data.timestamps.push(now);
 
-    data.second = data.second.filter((ts) => ts >= currentSecond);
-    data.minute = data.minute.filter((ts) => ts >= currentMinute);
-    data.hour = data.hour.filter((ts) => ts >= currentHour);
-    data.day = data.day.filter((ts) => ts >= currentDay);
+    // Clean up old timestamps (keep last 24 hours)
+    const oneDayAgo = now - 86400000;
+    data.timestamps = data.timestamps.filter((ts) => ts >= oneDayAgo);
 
     await this.cache.hSet(key, 'data', data);
   }
@@ -144,17 +136,19 @@ export class RateLimiterService {
   async getStatus(instanceName: string): Promise<RateLimiterStatusDto> {
     const config = await this.getConfig(instanceName);
     const now = Date.now();
-    const currentSecond = Math.floor(now / 1000);
-    const currentMinute = Math.floor(now / 60000);
-    const currentHour = Math.floor(now / 3600000);
-    const currentDay = Math.floor(now / 86400000);
+
+    // Sliding window boundaries
+    const oneSecondAgo = now - 1000;
+    const oneMinuteAgo = now - 60000;
+    const oneHourAgo = now - 3600000;
+    const oneDayAgo = now - 86400000;
 
     const data = await this.getRateLimitData(instanceName, config);
 
-    const secondMessages = data.second.filter((ts) => ts >= currentSecond);
-    const minuteMessages = data.minute.filter((ts) => ts >= currentMinute);
-    const hourMessages = data.hour.filter((ts) => ts >= currentHour);
-    const dayMessages = data.day.filter((ts) => ts >= currentDay);
+    const secondMessages = data.timestamps.filter((ts) => ts >= oneSecondAgo);
+    const minuteMessages = data.timestamps.filter((ts) => ts >= oneMinuteAgo);
+    const hourMessages = data.timestamps.filter((ts) => ts >= oneHourAgo);
+    const dayMessages = data.timestamps.filter((ts) => ts >= oneDayAgo);
 
     const remainingDay = config.messagesPerDay ? config.messagesPerDay - dayMessages.length : Infinity;
     const remainingHour = config.messagesPerHour ? config.messagesPerHour - hourMessages.length : Infinity;
@@ -174,10 +168,7 @@ export class RateLimiterService {
   async resetLimits(instanceName: string): Promise<void> {
     const key = this.getCacheKey(instanceName);
     await this.cache.hSet(key, 'data', {
-      second: [],
-      minute: [],
-      hour: [],
-      day: [],
+      timestamps: [],
       config: await this.getConfig(instanceName),
     });
   }
@@ -187,10 +178,7 @@ export class RateLimiterService {
     const data = await this.cache.hGet(key, 'data');
     return (
       data || {
-        second: [],
-        minute: [],
-        hour: [],
-        day: [],
+        timestamps: [],
         config,
       }
     );

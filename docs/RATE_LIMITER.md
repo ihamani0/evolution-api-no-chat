@@ -24,7 +24,7 @@ Configure rate limits for an instance.
 
 ```bash
 curl -X POST "{{baseUrl}}/rate-limiter/set/issam" \
-  -H "apikey: issamhamani19@" \
+  -H "apikey: xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "enabled": true,
@@ -62,7 +62,7 @@ Get current configuration.
 
 ```bash
 curl "{{baseUrl}}/rate-limiter/find/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 ---
@@ -74,7 +74,7 @@ Get usage statistics.
 
 ```bash
 curl "{{baseUrl}}/rate-limiter/status/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 **Response:**
@@ -99,7 +99,7 @@ Reset all message counters.
 
 ```bash
 curl -X DELETE "{{baseUrl}}/rate-limiter/reset/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 ---
@@ -113,7 +113,7 @@ Configure queue settings.
 
 ```bash
 curl -X POST "{{baseUrl}}/rate-limiter/queue/set/issam" \
-  -H "apikey: issamhamani19@" \
+  -H "apikey: xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "enabled": true,
@@ -141,7 +141,7 @@ curl -X POST "{{baseUrl}}/rate-limiter/queue/set/issam" \
 
 ```bash
 curl "{{baseUrl}}/rate-limiter/queue/find/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 ---
@@ -153,7 +153,7 @@ Get current queue status.
 
 ```bash
 curl "{{baseUrl}}/rate-limiter/queue/status/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 **Response:**
@@ -171,7 +171,7 @@ curl "{{baseUrl}}/rate-limiter/queue/status/issam" \
 
 ```bash
 curl "{{baseUrl}}/rate-limiter/queue/messages/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 ---
@@ -184,11 +184,11 @@ Manually trigger queue processing. Optionally add `?maxMessages=N` to limit.
 ```bash
 # Process up to 10 messages (default)
 curl -X POST "{{baseUrl}}/rate-limiter/queue/process/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 
 # Process up to 5 messages
 curl -X POST "{{baseUrl}}/rate-limiter/queue/process/issam?maxMessages=5" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 **Response:**
@@ -207,7 +207,7 @@ curl -X POST "{{baseUrl}}/rate-limiter/queue/process/issam?maxMessages=5" \
 
 ```bash
 curl -X DELETE "{{baseUrl}}/rate-limiter/queue/clear/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 **Response:**
@@ -224,7 +224,7 @@ curl -X DELETE "{{baseUrl}}/rate-limiter/queue/clear/issam" \
 
 ```bash
 curl -X DELETE "{{baseUrl}}/rate-limiter/queue/message/msg_abc123?instanceName=issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 ---
@@ -549,7 +549,7 @@ Simulate human typing to avoid WhatsApp bot detection.
 You can manually trigger queue processing anytime:
 ```bash
 curl -X POST "{{baseUrl}}/rate-limiter/queue/process/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 ---
@@ -559,11 +559,11 @@ curl -X POST "{{baseUrl}}/rate-limiter/queue/process/issam" \
 ```bash
 # 1. Reset counters
 curl -X DELETE "http://localhost:8080/rate-limiter/reset/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 
 # 2. Set rate limits (1 message per minute)
 curl -X POST "http://localhost:8080/rate-limiter/set/issam" \
-  -H "apikey: issamhamani19@" \
+  -H "apikey: xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "enabled": true,
@@ -573,37 +573,37 @@ curl -X POST "http://localhost:8080/rate-limiter/set/issam" \
 
 # 3. Enable queue
 curl -X POST "http://localhost:8080/rate-limiter/queue/set/issam" \
-  -H "apikey: issamhamani19@" \
+  -H "apikey: xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"enabled": true}'
 
 # 4. Send messages rapidly
 curl -X POST "http://localhost:8080/message/sendText/issam" \
-  -H "apikey: issamhamani19@" \
+  -H "apikey: xxxxxxxx" \
   -d '{"number": "201097441134", "text": "Message 1"}'
 # Returns: {"status": "PENDING"}
 
 curl -X POST "http://localhost:8080/message/sendText/issam" \
-  -H "apikey: issamhamani19@" \
+  -H "apikey: xxxxxxxx" \
   -d '{"number": "201097441134", "text": "Message 2"}'
 # Returns: {"queued": true, "messageId": "...", "position": 2}
 
 curl -X POST "http://localhost:8080/message/sendText/issam" \
-  -H "apikey: issamhamani19@" \
+  -H "apikey: xxxxxxxx" \
   -d '{"number": "201097441134", "text": "Message 3"}'
 # Returns: {"queued": true, "messageId": "...", "position": 3}
 
 # 5. Check queue status
 curl "http://localhost:8080/rate-limiter/queue/status/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 
 # 6. Manual process (or wait for auto-process)
 curl -X POST "http://localhost:8080/rate-limiter/queue/process/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 
 # 7. Check rate limiter status
 curl "http://localhost:8080/rate-limiter/status/issam" \
-  -H "apikey: issamhamani19@"
+  -H "apikey: xxxxxxxx"
 ```
 
 ---

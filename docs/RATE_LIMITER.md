@@ -236,11 +236,13 @@ curl -X DELETE "{{baseUrl}}/rate-limiter/queue/message/msg_abc123?instanceName=i
 | Parameter | Type | Default | Range | Description |
 |-----------|------|---------|-------|-------------|
 | `enabled` | boolean | `true` | - | Enable rate limiting |
-| `messagesPerSecond` | integer | `1` | 1-10 | Max messages/second |
-| `messagesPerMinute` | integer | `20` | 1-120 | Max messages/minute |
-| `messagesPerHour` | integer | `200` | 1-5000 | Max messages/hour |
-| `messagesPerDay` | integer | `1000` | 1-50000 | Max messages/day |
-| `delayBetweenMessages` | integer | `2000` | 0-60000 | Delay between messages (ms) |
+| `messagesPerSecond` | integer | `1` | 1-10 | Max messages per second |
+| `messagesPerMinute` | integer | `20` | 1-120 | Max messages per minute |
+| `messagesPerHour` | integer | `200` | 1-5000 | Max messages per hour |
+| `messagesPerDay` | integer | `1000` | 1-50000 | Max messages per day |
+| `delayBetweenMessages` | integer | `2000` | 0-60000 | Delay between messages (milliseconds) |
+| `maxRetries` | integer | `3` | 1-10 | Maximum retry attempts when rate limit is hit |
+| `backoffMultiplier` | number | `1.5` | 1-5 | Exponential backoff multiplier for retries |
 
 ### Human-Like Behavior
 
@@ -248,12 +250,208 @@ Simulate human typing to avoid WhatsApp bot detection.
 
 | Parameter | Type | Default | Range | Description |
 |-----------|------|---------|-------|-------------|
-| `humanLikeBehavior` | boolean | `true` | - | Enable typing simulation |
-| `typingSpeedMsPerChar` | integer | `50` | 10-200 | Base typing speed (ms per character) |
-| `minRandomVariation` | number | `0.5` | 0.1-1.0 | Min random multiplier (50% = 0.5) |
-| `maxRandomVariation` | number | `1.5` | 1.0-2.0 | Max random multiplier (150% = 1.5) |
-| `maxTypingDelayMs` | integer | `5000` | 1000-30000 | Max delay cap (ms) |
-| `markAsReadBeforeSend` | boolean | `true` | - | Mark message as read before replying |
+| `readMessages` | boolean | `false` | - | Mark incoming messages as read before replying (anti-ban) |
+| `maxMessagesToRead` | integer | `20` | 1-100 | Maximum number of incoming messages to mark as read at once |
+| `randomDelayBeforeReadMin` | integer | `1000` | 0-10000 | Minimum wait before marking as read (ms) |
+| `randomDelayBeforeReadMax` | integer | `3000` | 0-10000 | Maximum wait before marking as read (ms) |
+| `randomDelayBeforeReplyMin` | integer | `2000` | 0-30000 | Minimum wait before starting to type (ms) |
+| `randomDelayBeforeReplyMax` | integer | `8000` | 0-30000 | Maximum wait before starting to type (ms) |
+| `humanLikeBehavior` | boolean | `false` | - | Enable typing simulation |
+| `typingSpeedMsPerChar` | integer | `50` | 10-200 | Base typing speed (milliseconds per character) |
+| `minRandomVariation` | integer | `100` | 0-1000 | Minimum random delay variation (ms) |
+| `maxRandomVariation` | integer | `500` | 0-5000 | Maximum random delay variation (ms) |
+| `maxTypingDelayMs` | integer | `2000` | 0-10000 | Maximum typing delay cap (ms) |
+
+### Queue Configuration
+
+| Parameter | Type | Default | Range | Description |
+|-----------|------|---------|-------|-------------|
+| `enabled` | boolean | `false` | - | Enable message queue |
+| `maxRetries` | integer | `3` | 1-10 | Max retry attempts for failed messages |
+| `processInterval` | integer | `30` | 5-300 | Auto-process interval (seconds) |
+| `maxMessagesPerProcess` | integer | `10` | 1-50 | Max messages per processing cycle |
+| `autoProcess` | boolean | `true` | - | Enable automatic queue processing |
+
+### Rate Limiter Status Response
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `canSend` | boolean | Whether a message can be sent now |
+| `remainingToday` | number | Remaining messages allowed today |
+| `remainingThisHour` | number | Remaining messages allowed this hour |
+| `remainingThisMinute` | number | Remaining messages allowed this minute |
+| `totalSentToday` | number | Total messages sent today |
+| `totalSentThisHour` | number | Total messages sent this hour |
+| `totalSentThisMinute` | number | Total messages sent this minute |
+| `nextAvailableAt` | number | Timestamp when next message can be sent (if rate limited) |
+
+### Queue Status Response
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `count` | number | Number of messages in queue |
+| `lastProcessedAt` | number | Timestamp of last processing (null if never) |
+| `messages` | array | Array of queued messages (optional) |
+
+---
+
+## Parameter Details
+
+### Rate Limiting Parameters
+
+#### `messagesPerSecond`
+- **Description**: Maximum messages allowed per second
+- **Default**: 1
+- **Range**: 1-10
+- **Use Case**: Very strict limit for high-volume sending
+
+#### `messagesPerMinute`
+- **Description**: Maximum messages allowed per minute
+- **Default**: 20
+- **Range**: 1-120
+- **Use Case**: Standard limit for bulk messaging
+
+#### `messagesPerHour`
+- **Description**: Maximum messages allowed per hour
+- **Default**: 200
+- **Range**: 1-5000
+- **Use Case**: Hourly quota management
+
+#### `messagesPerDay`
+- **Description**: Maximum messages allowed per day
+- **Default**: 1000
+- **Range**: 1-50000
+- **Use Case**: Daily budget control
+
+#### `delayBetweenMessages`
+- **Description**: Wait time between sending each message
+- **Default**: 2000 (2 seconds)
+- **Range**: 0-60000 ms
+- **Use Case**: Add spacing between messages to appear more natural
+
+#### `maxRetries`
+- **Description**: How many times to retry when rate limited
+- **Default**: 3
+- **Range**: 1-10
+- **Use Case**: Queue messages for later sending when limit reached
+
+#### `backoffMultiplier`
+- **Description**: Exponential backoff multiplier for retry delays
+- **Default**: 1.5
+- **Range**: 1-5
+- **Use Case**: Increase wait time progressively on each retry
+
+---
+
+### Human-Like Behavior Parameters
+
+#### `humanLikeBehavior`
+- **Description**: Enable simulated human typing behavior
+- **Default**: false
+- **Use Case**: Avoid WhatsApp bot detection by simulating real user behavior
+
+#### `typingSpeedMsPerChar`
+- **Description**: Base time to type each character
+- **Default**: 50ms
+- **Range**: 10-200ms
+- **Use Case**: Lower = faster typing, Higher = slower typing
+- **Example**: 50ms × 100 chars = 5000ms base typing time
+
+#### `minRandomVariation`
+- **Description**: Minimum random delay added to typing time
+- **Default**: 100ms
+- **Range**: 0-1000ms
+- **Use Case**: Add natural variation to typing speed
+
+#### `maxRandomVariation`
+- **Description**: Maximum random delay added to typing time
+- **Default**: 500ms
+- **Range**: 0-5000ms
+- **Use Case**: Add natural variation to typing speed
+
+#### `maxTypingDelayMs`
+- **Description**: Maximum cap on total typing delay
+- **Default**: 2000ms
+- **Range**: 0-10000ms
+- **Use Case**: Prevent extremely long delays for long messages
+
+#### `readMessages`
+- **Description**: Mark incoming messages as read before sending reply
+- **Default**: false
+- **Use Case**: Simulate human reading behavior (anti-ban)
+
+#### `humanLikeBehavior`
+- **Description**: Enable simulated human typing behavior
+- **Default**: false
+- **Use Case**: Avoid WhatsApp bot detection by simulating real user behavior
+
+#### `typingSpeedMsPerChar`
+- **Description**: Base time to type each character
+- **Default**: 50ms
+- **Range**: 10-200ms
+- **Use Case**: Lower = faster typing, Higher = slower typing
+- **Example**: 50ms × 100 chars = 5000ms base typing time
+
+#### `minRandomVariation`
+- **Description**: Minimum random delay added to typing time
+- **Default**: 100ms
+- **Range**: 0-1000ms
+- **Use Case**: Add natural variation to typing speed
+
+#### `maxRandomVariation`
+- **Description**: Maximum random delay added to typing time
+- **Default**: 500ms
+- **Range**: 0-5000ms
+- **Use Case**: Add natural variation to typing speed
+
+#### `maxTypingDelayMs`
+- **Description**: Maximum cap on total typing delay
+- **Default**: 2000ms
+- **Range**: 0-10000ms
+- **Use Case**: Prevent extremely long delays for long messages
+
+---
+
+### Queue Parameters
+
+#### `enabled`
+- **Description**: Enable message queuing when rate limit is reached
+- **Default**: false
+- **Use Case**: Automatically queue messages instead of failing
+
+#### `maxRetries`
+- **Description**: Maximum attempts to process a queued message
+- **Default**: 3
+- **Range**: 1-10
+- **Use Case**: Handle persistent failures gracefully
+
+#### `processInterval`
+- **Description**: How often to automatically process queued messages
+- **Default**: 30 seconds
+- **Range**: 5-300 seconds
+- **Use Case**: Balance between quick delivery and rate limiting
+
+#### `maxMessagesPerProcess`
+- **Description**: Maximum messages to send per processing cycle
+- **Default**: 10
+- **Range**: 1-50
+- **Use Case**: Control batch size during processing
+
+#### `autoProcess`
+- **Description**: Enable automatic background processing
+- **Default**: true
+- **Use Case**: Process queue without manual intervention
+
+**How Human-Like Behavior Works:**
+
+1. **Mark as read** (if `readMessages` enabled) - Wait random delay, then mark incoming message as read
+2. **Random delay** (if `humanLikeBehavior` enabled) - Wait random "thinking" time before typing
+3. **Start typing** - Send "typing" indicator to WhatsApp
+4. **Calculate delay** - Based on message length × typing speed
+5. **Add variation** - Apply random delay between min/max
+6. **Cap delay** - Ensure delay doesn't exceed maxTypingDelayMs
+7. **Stop typing** - Remove "typing" indicator
+8. **Send message** - Actually send the WhatsApp message
 
 **Example - Full Configuration:**
 ```json
@@ -263,33 +461,25 @@ Simulate human typing to avoid WhatsApp bot detection.
   "messagesPerHour": 200,
   "messagesPerDay": 1000,
   "delayBetweenMessages": 2000,
+  "readMessages": true,
+  "randomDelayBeforeReadMin": 1000,
+  "randomDelayBeforeReadMax": 3000,
+  "randomDelayBeforeReplyMin": 2000,
+  "randomDelayBeforeReplyMax": 8000,
   "humanLikeBehavior": true,
   "typingSpeedMsPerChar": 50,
-  "minRandomVariation": 0.5,
-  "maxRandomVariation": 1.5,
-  "maxTypingDelayMs": 5000,
-  "markAsReadBeforeSend": true
+  "minRandomVariation": 100,
+  "maxRandomVariation": 500,
+  "maxTypingDelayMs": 2000
 }
 ```
 
-**How Human-Like Behavior Works:**
-
-1. **Send "seen"** - Mark incoming message as read before replying
-2. **Start typing** - Show "typing" indicator
-3. **Random delay** - Wait based on message size with random variation:
-   - Calculate: `payloadSize × typingSpeedMsPerChar`
-   - Apply random variation: `× (minRandomVariation to maxRandomVariation)`
-   - Cap at: `maxTypingDelayMs`
-4. **Stop typing** - Hide typing indicator
-5. **Send message** - Send the actual WhatsApp message
-
-**Example:**
-- Message payload: 100 characters
-- Typing speed: 50ms/char
-- Base delay: 100 × 50 = 5000ms
-- Random variation (0.5 - 1.5): 2500ms - 7500ms
-- Capped at 5000ms
-- Actual delay: Random between 2500-5000ms
+**Example Calculation:**
+- Message: "Hello, how are you?" (20 characters)
+- `typingSpeedMsPerChar`: 50ms
+- Base delay: 20 × 50 = 1000ms
+- Random variation: 100-500ms
+- Final delay: 1100-1500ms (capped at maxTypingDelayMs if lower)
 
 ---
 
@@ -304,7 +494,13 @@ Simulate human typing to avoid WhatsApp bot detection.
   "messagesPerMinute": 10,
   "messagesPerHour": 100,
   "messagesPerDay": 500,
-  "delayBetweenMessages": 5000
+  "delayBetweenMessages": 5000,
+  "readMessages": true,
+  "randomDelayBeforeReadMin": 1000,
+  "randomDelayBeforeReadMax": 3000,
+  "randomDelayBeforeReplyMin": 3000,
+  "randomDelayBeforeReplyMax": 8000,
+  "humanLikeBehavior": true
 }
 ```
 
@@ -315,7 +511,13 @@ Simulate human typing to avoid WhatsApp bot detection.
   "messagesPerMinute": 30,
   "messagesPerHour": 300,
   "messagesPerDay": 1500,
-  "delayBetweenMessages": 2000
+  "delayBetweenMessages": 2000,
+  "readMessages": true,
+  "randomDelayBeforeReadMin": 1000,
+  "randomDelayBeforeReadMax": 3000,
+  "randomDelayBeforeReplyMin": 2000,
+  "randomDelayBeforeReplyMax": 8000,
+  "humanLikeBehavior": true
 }
 ```
 
@@ -328,6 +530,12 @@ Simulate human typing to avoid WhatsApp bot detection.
 1. **Send message** → Check rate limits
 2. **If limit OK** → Send message + apply delay + record
 3. **If limit FULL** → Queue message in Redis + return `queued: true`
+
+### Human-Like Behavior Flow (when enabled)
+
+1. **If `readMessages` enabled**: Wait random delay (1-3s) → Mark message as read
+2. **If `humanLikeBehavior` enabled**: Wait random delay (2-8s) → Show "typing..." → Type → Hide "typing..."
+3. **Send message**
 
 ### Auto-Processing
 

@@ -2306,16 +2306,84 @@ export class BaileysStartupService extends ChannelStartupService {
     return 'unknown';
   }
 
+  private async readIncomingMessages(sender: string): Promise<void> {
+    try {
+      const senderJid = createJid(sender);
+
+      const config = await rateLimiterService.getConfig(this.instanceName);
+      const maxToRead = config.maxMessagesToRead ?? 20;
+
+      const allMessages = await this.prismaRepository.message.findMany({
+        where: {
+          instanceId: this.instanceId,
+          AND: [
+            {
+              OR: [
+                { key: { path: ['remoteJid'], equals: senderJid } },
+                { key: { path: ['remoteJidAlt'], equals: senderJid } },
+              ],
+            },
+            { key: { path: ['fromMe'], equals: false } },
+          ],
+        } as any,
+        orderBy: {
+          messageTimestamp: 'desc',
+        },
+        take: maxToRead,
+      });
+
+      if (!allMessages || allMessages.length === 0) {
+        this.logger.log('readIncomingMessages: no incoming messages found for ' + senderJid);
+        return;
+      }
+
+      this.logger.log('readIncomingMessages: found ' + allMessages.length + ' incoming message(s), max=' + maxToRead);
+
+      const minDelay = config.randomDelayBeforeReadMin ?? 1000;
+      const maxDelay = config.randomDelayBeforeReadMax ?? 3000;
+      const randomDelay = minDelay + Math.random() * (maxDelay - minDelay);
+
+      this.logger.log('readIncomingMessages: waiting ' + randomDelay.toFixed(0) + 'ms before marking as read');
+      await delay(randomDelay);
+
+      const messageKeys: proto.IMessageKey[] = allMessages.map((msg) => {
+        const dbKey = msg.key as any;
+        return {
+          id: dbKey.id,
+          remoteJid: dbKey.remoteJid,
+          fromMe: dbKey.fromMe === false || dbKey.fromMe === 'false' ? false : true,
+          participant: dbKey.participant,
+        };
+      });
+
+      await this.client.readMessages(messageKeys);
+
+      this.logger.log('readIncomingMessages: ' + messageKeys.length + ' message(s) marked as read');
+    } catch (error) {
+      this.logger.warn('readIncomingMessages: failed: ' + error);
+    }
+  }
+
   private async simulateHumanBehavior(sender: string, messagePayload: any, config: any): Promise<void> {
+    this.logger.log(
+      `Human behavior: called with config - humanLikeBehavior: ${config.humanLikeBehavior}, typingSpeedMsPerChar: ${config.typingSpeedMsPerChar}, minRandomVariation: ${config.minRandomVariation}, maxRandomVariation: ${config.maxRandomVariation}, maxTypingDelayMs: ${config.maxTypingDelayMs}`,
+    );
+
     if (!config.humanLikeBehavior) {
+      this.logger.log('Human behavior: disabled, skipping');
       return;
     }
 
     try {
-      // Convert phone number to WhatsApp JID format (e.g., 213697096705 -> 213697096705@s.whatsapp.net)
       const senderJid = createJid(sender);
 
-      // Always do typing simulation
+      const minReplyDelay = config.randomDelayBeforeReplyMin ?? 2000;
+      const maxReplyDelay = config.randomDelayBeforeReplyMax ?? 8000;
+      const replyDelay = minReplyDelay + Math.random() * (maxReplyDelay - minReplyDelay);
+
+      this.logger.log(`Human behavior: waiting ${replyDelay.toFixed(0)}ms before typing`);
+      await delay(replyDelay);
+
       await this.client.presenceSubscribe(senderJid);
       await this.client.sendPresenceUpdate('composing', senderJid);
 
@@ -2323,15 +2391,16 @@ export class BaileysStartupService extends ChannelStartupService {
       const typingSpeed = config.typingSpeedMsPerChar || 50;
       const baseDelay = payloadSize * typingSpeed;
 
-      const minVar = config.minRandomVariation || 0.5;
-      const maxVar = config.maxRandomVariation || 1.5;
-      const randomMultiplier = minVar + Math.random() * (maxVar - minVar);
-      const randomDelay = baseDelay * randomMultiplier;
+      const minVar = config.minRandomVariation || 100;
+      const maxVar = config.maxRandomVariation || 500;
+      const randomDelay = minVar + Math.random() * (maxVar - minVar);
 
-      const maxDelay = config.maxTypingDelayMs || 5000;
-      const finalDelay = Math.min(randomDelay, maxDelay);
+      const maxDelay = config.maxTypingDelayMs || 2000;
+      const finalDelay = Math.min(baseDelay + randomDelay, maxDelay);
 
-      this.logger.log('Human behavior: typing for ' + finalDelay + 'ms (' + payloadSize + ' chars)');
+      this.logger.log(
+        `Human behavior: payloadSize=${payloadSize} chars, baseDelay=${baseDelay}ms, randomDelay=${randomDelay.toFixed(0)}ms, maxDelay=${maxDelay}ms, finalDelay=${finalDelay}ms`,
+      );
 
       await delay(finalDelay);
 
@@ -2432,6 +2501,11 @@ export class BaileysStartupService extends ChannelStartupService {
     this.logger.verbose(`Sending message to ${sender}`);
 
     try {
+      if (config.readMessages) {
+        this.logger.log('readMessages enabled: marking incoming messages as read');
+        await this.readIncomingMessages(sender);
+      }
+
       if (config.humanLikeBehavior) {
         await this.simulateHumanBehavior(sender, message, config);
       } else if (options?.delay) {

@@ -19,6 +19,12 @@ export class RateLimiterService {
     delayBetweenMessages: 2000,
     maxRetries: 3,
     backoffMultiplier: 1.5,
+    readMessages: false,
+    maxMessagesToRead: 20,
+    randomDelayBeforeReadMin: 1000,
+    randomDelayBeforeReadMax: 3000,
+    randomDelayBeforeReplyMin: 2000,
+    randomDelayBeforeReplyMax: 8000,
   };
 
   constructor(cacheService: CacheService) {

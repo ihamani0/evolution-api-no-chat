@@ -48,5 +48,5 @@ lerna-debug.log*
 /prisma/migrations/*
 
 /.opencode/*
-/evolution-manager-v2/* 
+/evolution-manager-v2
 /docs/RATE_LIMITER_GUIDE.md

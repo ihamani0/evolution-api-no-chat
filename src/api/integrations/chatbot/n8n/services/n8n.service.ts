@@ -1,6 +1,7 @@
 import { PrismaRepository } from '@api/repository/repository.service';
 import { WAMonitoringService } from '@api/services/monitor.service';
 import { ConfigService, HttpServer } from '@config/env.config';
+import { Logger } from '@config/logger.config';
 import { IntegrationSession, N8n, N8nSetting } from '@prisma/client';
 import axios from 'axios';
 
@@ -27,6 +28,55 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
     return 'n8n';
   }
 
+  /**
+   * Get conversation history for context
+   */
+  private async getConversationHistory(
+    remoteJid: string,
+    instanceId: string,
+    windowSize: number,
+  ): Promise<Array<{ role: string; content: string }>> {
+    if (windowSize <= 0) return [];
+
+    try {
+      const messages = await this.prismaRepository.message.findMany({
+        where: {
+          instanceId,
+          AND: [
+            {
+              OR: [
+                { key: { path: ['remoteJid'], equals: remoteJid } },
+                { key: { path: ['remoteJidAlt'], equals: remoteJid } },
+              ],
+            },
+            { key: { path: ['fromMe'], equals: false } },
+          ],
+        } as any,
+        orderBy: {
+          messageTimestamp: 'desc',
+        },
+        take: windowSize,
+      });
+
+      return messages.reverse().map((msg: any) => {
+        const msgContent =
+          msg.message?.conversation ||
+          msg.message?.extendedTextMessage?.text ||
+          msg.message?.documentMessage?.caption ||
+          msg.message?.imageMessage?.caption ||
+          '[media]';
+
+        return {
+          role: msg.key?.fromMe ? 'assistant' : 'user',
+          content: msgContent,
+        };
+      });
+    } catch (error) {
+      this.logger.warn(`Failed to fetch conversation history: ${error}`);
+      return [];
+    }
+  }
+
   protected async sendMessageToBot(
     instance: any,
     session: IntegrationSession,
@@ -44,8 +94,14 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
       }
 
       const endpoint: string = n8n.webhookUrl;
+
+      // Build conversation history
+      const history = await this.getConversationHistory(remoteJid, instance.instanceId, n8n.contextWindowSize || 0);
+
       const payload: any = {
         chatInput: content,
+        systemMessage: n8n.systemMessage || undefined,
+        conversationHistory: history.length > 0 ? history : undefined,
         sessionId: session.sessionId,
         remoteJid: remoteJid,
         pushName: pushName,
@@ -75,6 +131,7 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
         const auth = Buffer.from(`${n8n.basicAuthUser}:${n8n.basicAuthPass}`).toString('base64');
         headers['Authorization'] = `Basic ${auth}`;
       }
+
       const response = await axios.post(endpoint, payload, { headers });
       const message = response?.data?.output || response?.data?.answer;
 
@@ -91,8 +148,22 @@ export class N8nService extends BaseChatbotService<N8n, N8nSetting> {
         },
       });
     } catch (error) {
-      this.logger.error(error.response?.data || error);
-      return;
+      this.logger.error(`[N8n] Webhook failed: ${error.message}`);
+
+      if (n8n.fallbackMessage) {
+        this.logger.log(`[N8n] Sending fallback message to user`);
+        await this.sendMessageWhatsApp(instance, remoteJid, n8n.fallbackMessage, settings, true);
+      }
+
+      await this.prismaRepository.integrationSession.update({
+        where: {
+          id: session.id,
+        },
+        data: {
+          status: 'opened',
+          awaitUser: true,
+        },
+      });
     }
   }
 }

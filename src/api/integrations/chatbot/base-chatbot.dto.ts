@@ -21,6 +21,9 @@ export class BaseChatbotDto {
   ignoreJids?: string[];
   splitMessages?: boolean;
   timePerChar?: number;
+  systemMessage?: string;
+  contextWindowSize?: number;
+  fallbackMessage?: string;
 }
 
 /**

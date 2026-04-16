@@ -226,6 +226,9 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
         ignoreJids: data.ignoreJids,
         splitMessages: data.splitMessages,
         timePerChar: data.timePerChar,
+        systemMessage: data.systemMessage,
+        contextWindowSize: data.contextWindowSize,
+        fallbackMessage: data.fallbackMessage,
         ...this.getAdditionalBotData(data),
       };
 
@@ -715,6 +718,9 @@ export abstract class BaseChatbotController<BotType = any, BotData extends BaseC
         ignoreJids: data.ignoreJids,
         splitMessages: data.splitMessages,
         timePerChar: data.timePerChar,
+        systemMessage: data.systemMessage,
+        contextWindowSize: data.contextWindowSize,
+        fallbackMessage: data.fallbackMessage,
         ...this.getAdditionalUpdateFields(data),
       };
 

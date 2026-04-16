@@ -3,7 +3,7 @@ version: "3.8"
 services:
   api:
     container_name: evolution_api
-    image: ihamani0/evolution-api:latest
+    image: ihamani0/evolution-api:n8n-features
     restart: always
     depends_on:
       - redis
@@ -57,6 +57,8 @@ services:
       - evolution-net
     expose:
       - "5432"
+    ports:
+      - "5430:5432"
 
 volumes:
   evolution_instances:

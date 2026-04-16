@@ -43,6 +43,22 @@ export const n8nSchema: JSONSchema7 = {
     ignoreJids: { type: 'array', items: { type: 'string' } },
     splitMessages: { type: 'boolean' },
     timePerChar: { type: 'integer' },
+    systemMessage: {
+      type: 'string',
+      description: 'System prompt for AI context',
+    },
+    contextWindowSize: {
+      type: 'integer',
+      minimum: 0,
+      maximum: 20,
+      default: 0,
+      description: 'Number of previous messages to include in conversation context',
+    },
+    fallbackMessage: {
+      type: 'string',
+      maxLength: 500,
+      description: 'Message sent to user when n8n webhook fails',
+    },
   },
   required: ['enabled', 'webhookUrl', 'triggerType'],
   ...isNotEmpty('enabled', 'webhookUrl', 'triggerType'),

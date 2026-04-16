@@ -5,6 +5,9 @@ export class N8nDto extends BaseChatbotDto {
   webhookUrl?: string;
   basicAuthUser?: string;
   basicAuthPass?: string;
+  systemMessage?: string;
+  contextWindowSize?: number;
+  fallbackMessage?: string;
 }
 
 export class N8nSettingDto extends BaseChatbotSettingDto {
@@ -13,5 +16,15 @@ export class N8nSettingDto extends BaseChatbotSettingDto {
 
 export class N8nMessageDto {
   chatInput: string;
+  systemMessage?: string;
+  conversationHistory?: Array<{ role: string; content: string }>;
   sessionId: string;
+  remoteJid: string;
+  pushName: string;
+  keyId?: string;
+  fromMe?: boolean;
+  quotedMessage?: any;
+  instanceName: string;
+  serverUrl: string;
+  apiKey: string;
 }
